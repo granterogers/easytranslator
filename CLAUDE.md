@@ -80,6 +80,18 @@
   live call (this dev sandbox's egress is restricted to GitHub only) — if
   it starts failing, check whether Google changed the response shape
   before assuming it's just rate-limited.
+- `api.translateText()` returns which provider actually answered
+  (`provider` field). `js/main.js`'s `describeTranslationSource()` shows
+  `#translationNote` for anything OTHER than Google or the on-device
+  model ("Translated via LibreTranslate/MyMemory (Google unavailable)")
+  — nothing is shown when Google succeeds, since that's the expected/
+  default-quality path and showing a note every time would just be
+  noise. This exists specifically so a wording difference from the real
+  Google Translate app has a visible, honest explanation (a fallback
+  provider answered instead) rather than looking like an unexplained
+  quality bug. The note is saved with the history entry (`provider`,
+  `usedDictionary` fields) so replaying that exact entry later (see
+  `findHistoryMatch()` below) shows the same attribution, not a blank one.
 - `MYMEMORY_MAX_CHARS` (500) guards against MyMemory's documented
   free/anonymous-tier limit — a request over that length doesn't error,
   it comes back HTTP 200 with a **silently truncated** translation, which
@@ -113,7 +125,7 @@
   downloaded neural model: once you've translated a phrase online once
   (through whichever provider — Google, LibreTranslate, MyMemory — was
   live at the time), retyping that exact phrase later with no network at
-  all replays the real saved result, full quality, no `#dictNote`
+  all replays the real saved result, full quality, no `#translationNote`
   disclaimer. It's exact-match only, deliberately — no fuzzy/partial
   matching, since a near-miss could replay the wrong sentence's
   translation with no way for the user to tell. Only text that's never
@@ -124,7 +136,7 @@
   throws (every server exhausted), there's no downloaded neural pack for
   the pair, AND `findHistoryMatch()` comes up empty. Pure word-for-word
   substitution, no grammar or word order, so a translated result always
-  shows `#dictNote` ("approximate, not a full translation") — never
+  shows `#translationNote` ("approximate, not a full translation") — never
   silently pass this off as equivalent to a real translation. Entries are
   stored in the target's native script (Cyrillic for Bulgarian);
   romanization is applied afterward by the same `transliterateBulgarian()`
@@ -253,9 +265,13 @@
   toast for success/failure). Both `.source-text` and `.result-text` carry
   extra right padding (`44px`) so real text content never renders under
   the floating icon. `#offlineBtn` is the same idea at a smaller size
-  (30px, sitting in `.lang-toggle-row` next to the collapse chevron
-  instead of as its own full-width pill below the language row) — its
-  descriptive text moved from a visible label into `title`/`aria-label`
+  (30px, sitting in `.lang-row` immediately after the target-language
+  dropdown instead of as its own full-width pill below the language row)
+  — living inside `#langRow` specifically means collapsing the language
+  row (`#langToggleBtn`) hides it along with the dropdowns, leaving just
+  the collapse chevron and the text box, rather than it sticking around
+  as a separate always-visible row. Its descriptive text moved from a
+  visible label into `title`/`aria-label`
   (screen readers and desktop hover still get it), and since a hover-only
   title is invisible on a touch device, `setOfflineButtonState()`'s error
   case additionally fires a toast so the message is still actually seen.

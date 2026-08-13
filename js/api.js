@@ -307,7 +307,7 @@ export async function translateText({ text, source, target }) {
     try {
       const result = await provider.run();
       localStorage.setItem(PROVIDER_KEY, provider.id);
-      return result;
+      return { ...result, provider: provider.id };
     } catch (err) {
       lastErr = err;
       console.warn(`[translate] ${provider.id} failed:`, err.message);

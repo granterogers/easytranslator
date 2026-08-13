@@ -31,7 +31,7 @@ const el = {
   resultBlock: $('resultBlock'),
   resultText: $('resultText'),
   copyResultBtn: $('copyResultBtn'),
-  dictNote: $('dictNote'),
+  translationNote: $('translationNote'),
   viewTranslate: $('view-translate'),
   viewHistory: $('view-history'),
   historyList: $('historyList'),
@@ -206,7 +206,7 @@ el.swapBtn.addEventListener('click', () => {
     el.sourceText.value = resVal;
     el.resultText.textContent = srcVal;
     fitResultFontSize(srcVal);
-    el.dictNote.hidden = true;
+    el.translationNote.hidden = true;
   }
   toggleClearButton();
   persistLanguageChoice();
@@ -392,6 +392,21 @@ function findHistoryMatch(source, target, text) {
   ) || null;
 }
 
+// Google is the expected/default-quality provider (see js/api.js), so no
+// note is shown when it's the one that answered — only when a lesser
+// fallback provider actually produced the result, so a wording difference
+// from the real Google Translate app has a visible, honest explanation
+// right on the result instead of silently looking like a quality bug.
+const PROVIDER_LABELS = { libretranslate: 'LibreTranslate', mymemory: 'MyMemory' };
+
+function describeTranslationSource(usedDictionary, provider) {
+  if (usedDictionary) return 'Offline word dictionary — approximate, not a full translation';
+  if (provider && provider !== 'google' && provider !== 'offline-model') {
+    return `Translated via ${PROVIDER_LABELS[provider] || provider} (Google unavailable)`;
+  }
+  return null;
+}
+
 async function runTranslate() {
   const text = el.sourceText.value.trim();
   const source = el.sourceLang.value;
@@ -403,7 +418,7 @@ async function runTranslate() {
     hideError();
     el.resultBlock.hidden = true;
     el.detectedLabel.hidden = true;
-    el.dictNote.hidden = true;
+    el.translationNote.hidden = true;
     return;
   }
 
@@ -416,10 +431,12 @@ async function runTranslate() {
     let translatedText;
     let detectedLanguage;
     let usedDictionary = false;
+    let provider = null;
     if (useOffline) {
       try {
         translatedText = await offline.translateOffline(source, target, text);
         detectedLanguage = null;
+        provider = 'offline-model';
       } catch (offlineErr) {
         // The pack was recorded as downloaded, but the underlying model
         // files are gone (e.g. evicted by the browser under storage
@@ -432,7 +449,10 @@ async function runTranslate() {
       }
     } else {
       try {
-        ({ translatedText, detectedLanguage } = await api.translateText({ text, source, target }));
+        const result = await api.translateText({ text, source, target });
+        translatedText = result.translatedText;
+        detectedLanguage = result.detectedLanguage;
+        provider = result.provider;
       } catch (apiErr) {
         // Every server is unreachable. First choice: have we translated
         // this exact text for this exact pair before? If so, replay that
@@ -445,6 +465,8 @@ async function runTranslate() {
         if (historyMatch) {
           translatedText = historyMatch.translatedText;
           detectedLanguage = historyMatch.detectedLanguage || null;
+          usedDictionary = Boolean(historyMatch.usedDictionary);
+          provider = historyMatch.provider || null;
         } else if (source !== 'auto' && hasDictionary(source, target)) {
           const result = translateWithDictionary(text, source, target);
           translatedText = result.text;
@@ -464,7 +486,9 @@ async function runTranslate() {
     el.resultText.textContent = translatedText;
     fitResultFontSize(translatedText);
     el.resultBlock.hidden = false;
-    el.dictNote.hidden = !usedDictionary;
+    const note = describeTranslationSource(usedDictionary, provider);
+    el.translationNote.textContent = note || '';
+    el.translationNote.hidden = !note;
 
     if (source === 'auto' && detectedLanguage) {
       const name = languageNames.get(detectedLanguage) || detectedLanguage;
@@ -480,6 +504,8 @@ async function runTranslate() {
       sourceLang: source,
       targetLang: target,
       detectedLanguage: detectedLanguage || null,
+      provider: provider || null,
+      usedDictionary,
       timestamp: Date.now(),
     };
     const id = await db.addEntry(entry);
@@ -612,7 +638,9 @@ function restoreEntry(entry) {
   el.resultText.textContent = entry.translatedText;
   fitResultFontSize(entry.translatedText);
   el.resultBlock.hidden = false;
-  el.dictNote.hidden = true;
+  const note = describeTranslationSource(Boolean(entry.usedDictionary), entry.provider || null);
+  el.translationNote.textContent = note || '';
+  el.translationNote.hidden = !note;
   hideError();
 
   if (entry.sourceLang === 'auto' && entry.detectedLanguage) {

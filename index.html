@@ -28,16 +28,9 @@
     <!-- TRANSLATE VIEW -->
     <section id="view-translate" class="view" data-view="translate">
 
-      <div class="lang-toggle-row">
-        <button id="langToggleBtn" class="lang-toggle-btn" type="button" aria-expanded="true" aria-controls="langRow" aria-label="Hide language selectors">
-          <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
-        </button>
-        <button id="offlineBtn" class="offline-btn" type="button" aria-label="Download for offline use" title="Download for offline use">
-          <svg class="offline-icon offline-icon-download" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.59l3.3-3.3 1.4 1.42L12 17.42l-4.7-4.71 1.4-1.42 3.3 3.3V3h2zM5 19h14v2H5v-2z"/></svg>
-          <span class="mini-spinner offline-icon-spinner" aria-hidden="true" hidden></span>
-          <span id="offlineBtnBadge" class="offline-badge" hidden></span>
-        </button>
-      </div>
+      <button id="langToggleBtn" class="lang-toggle-btn" type="button" aria-expanded="true" aria-controls="langRow" aria-label="Hide language selectors">
+        <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
+      </button>
 
       <div class="lang-row" id="langRow">
         <select id="sourceLang" class="lang-select" aria-label="Source language"></select>
@@ -45,6 +38,11 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h11l-3-3 1.4-1.4L21.8 8l-5.4 5.4L15 12l3-3H7V7zm10 10H6l3 3-1.4 1.4L2.2 16l5.4-5.4L9 12l-3 3h11v2z"/></svg>
         </button>
         <select id="targetLang" class="lang-select" aria-label="Target language"></select>
+        <button id="offlineBtn" class="offline-btn" type="button" aria-label="Download for offline use" title="Download for offline use">
+          <svg class="offline-icon offline-icon-download" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.59l3.3-3.3 1.4 1.42L12 17.42l-4.7-4.71 1.4-1.42 3.3 3.3V3h2zM5 19h14v2H5v-2z"/></svg>
+          <span class="mini-spinner offline-icon-spinner" aria-hidden="true" hidden></span>
+          <span id="offlineBtnBadge" class="offline-badge" hidden></span>
+        </button>
       </div>
 
       <div class="field-block">
@@ -72,7 +70,7 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
           </button>
         </div>
-        <p id="dictNote" class="dict-note" hidden>Offline word dictionary — approximate, not a full translation</p>
+        <p id="translationNote" class="translation-note" hidden></p>
       </div>
 
     </section>

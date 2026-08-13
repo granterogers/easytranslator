@@ -9,6 +9,9 @@
   Bump minor/major only for deliberately larger changes, at your judgment.
 - The version is shown subtly in the Settings sheet (`#versionTag` in
   `index.html`), not anywhere prominent in the main UI.
+- After actually pushing, end the reply's very last line with
+  `Pushed to GitHub vX.X.X` (nothing after it) so it's visible without
+  scrolling up. Only write it once the push has actually succeeded.
 
 ## Cache-busting / auto-update
 

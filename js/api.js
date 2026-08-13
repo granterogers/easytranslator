@@ -2,26 +2,25 @@
 // server from the browser — no backend of our own, no API key required.
 //
 // Public LibreTranslate mirrors are free but flaky (rate limits, downtime,
-// CORS lockdowns). Rather than hard-failing on one dead mirror, we race a
-// short list of known-good ones and remember whichever answers first.
-// Setting an explicit server in Settings opts out of this and pins to
-// exactly that server.
+// CORS lockdowns) and the pool of them churns constantly. Rather than
+// hard-failing on one dead mirror, we race a short list of known-good ones
+// and remember whichever answers first. This list is the *official*
+// no-API-key clearnet mirror list published at
+// https://github.com/LibreTranslate/Documentation (docs/community/mirrors),
+// not a guessed/hardcoded set — that page is the source of truth going
+// forward, since third-party mirrors that seemed fine at any one point in
+// time regularly disappear. Setting an explicit server in Settings opts
+// out of this and pins to exactly that server.
 
 const CUSTOM_ENDPOINT_KEY = 'lt_endpoint_custom';
 const RESOLVED_ENDPOINT_KEY = 'lt_endpoint_resolved';
 
-export const DEFAULT_ENDPOINT = 'https://translate.astian.org';
-
 const CANDIDATE_ENDPOINTS = [
-  'https://translate.astian.org',
-  'https://libretranslate.de',
-  'https://lt.vern.cc',
-  'https://translate.fortytwo-it.com',
-  'https://libretranslate.pussthecat.org',
-  'https://translate.terraprint.co',
+  'https://translate.cutie.dating',
   'https://translate.fedilab.app',
-  'https://trans.zillyhuhn.com',
 ];
+
+export const DEFAULT_ENDPOINT = CANDIDATE_ENDPOINTS[0];
 
 const REQUEST_TIMEOUT_MS = 8000;
 
@@ -162,11 +161,13 @@ async function raceEndpoints(path, options) {
   }
 
   const resolved = getResolvedEndpoint();
+  let resolvedFailure = null;
   if (resolved) {
     try {
       const { res } = await attempt(resolved, path, options);
       return res;
     } catch (err) {
+      resolvedFailure = err;
       console.warn('[translate] resolved mirror failed, falling back:', err.message);
     }
   }
@@ -177,7 +178,10 @@ async function raceEndpoints(path, options) {
     rememberResolved(base);
     return res;
   } catch (aggregate) {
-    const reasons = (aggregate.errors || []).map((e) => e.message);
+    const reasons = [
+      ...(resolvedFailure ? [resolvedFailure.message] : []),
+      ...(aggregate.errors || []).map((e) => e.message),
+    ];
     console.error('[translate] all mirrors failed:', reasons);
     const detail = reasons.length ? ` (${reasons.join('; ')})` : '';
     throw new Error(`Could not reach any translation server${detail}. Check your connection, or set a specific server in Settings.`);

@@ -1,8 +1,15 @@
 import * as db from './db.js';
 import * as api from './api.js';
+import * as offline from './offline-models.js';
 import { APP_VERSION } from './version.js';
 
-const DEBOUNCE_MS = 600;
+// Translating fires on word boundaries (space/newline/punctuation) almost
+// immediately, so results update word-by-word as you type. Mid-word we
+// wait a bit longer — translating a half-typed word is low value and
+// would just look jittery.
+const WORD_BOUNDARY_DEBOUNCE_MS = 120;
+const MID_WORD_DEBOUNCE_MS = 450;
+const WORD_BOUNDARY_RE = /[\s.,!?;:\n]$/;
 
 const $ = (id) => document.getElementById(id);
 
@@ -10,6 +17,8 @@ const el = {
   sourceLang: $('sourceLang'),
   targetLang: $('targetLang'),
   swapBtn: $('swapBtn'),
+  offlineBtn: $('offlineBtn'),
+  offlineBtnLabel: $('offlineBtnLabel'),
   sourceText: $('sourceText'),
   statusLabel: $('statusLabel'),
   detectedLabel: $('detectedLabel'),
@@ -37,7 +46,6 @@ const el = {
   toast: $('toast'),
 };
 
-const LAST_SOURCE_KEY = 'lt_last_source';
 const LAST_TARGET_KEY = 'lt_last_target';
 
 let languages = [];
@@ -86,11 +94,10 @@ function populateLanguageSelects() {
   el.sourceLang.innerHTML = sourceOptions;
   el.targetLang.innerHTML = targetOptions;
 
-  const lastSource = localStorage.getItem(LAST_SOURCE_KEY);
+  // Source always starts on English — no need to pick it every time.
+  el.sourceLang.value = languageNames.has('en') ? 'en' : 'auto';
+
   const lastTarget = localStorage.getItem(LAST_TARGET_KEY);
-
-  el.sourceLang.value = (lastSource && languageNames.has(lastSource)) ? lastSource : 'auto';
-
   const browserLang = (navigator.language || 'en').slice(0, 2);
   const fallbackTarget = languages.some((l) => l.code === browserLang) && browserLang !== 'en'
     ? browserLang
@@ -102,13 +109,15 @@ function populateLanguageSelects() {
   if (!el.targetLang.value) el.targetLang.value = fallbackTarget;
 }
 
+// Only the target language is remembered across launches — source always
+// resets to English on load (see populateLanguageSelects).
 function persistLanguageChoice() {
-  localStorage.setItem(LAST_SOURCE_KEY, el.sourceLang.value);
   localStorage.setItem(LAST_TARGET_KEY, el.targetLang.value);
 }
 
 function onLangChange() {
   persistLanguageChoice();
+  updateOfflineButton();
   clearTimeout(debounceTimer);
   runTranslate();
 }
@@ -135,6 +144,74 @@ el.swapBtn.addEventListener('click', () => {
   }
   toggleClearButton();
   persistLanguageChoice();
+  updateOfflineButton();
+});
+
+// ---------- Offline (on-device) model download ----------
+
+let offlineDownloadInFlight = false;
+
+function setOfflineButtonState(state, label) {
+  el.offlineBtn.classList.toggle('is-downloaded', state === 'downloaded');
+  el.offlineBtn.classList.toggle('is-error', state === 'error');
+  el.offlineBtn.querySelector('.offline-icon-download').hidden = state !== 'idle' && state !== 'error';
+  el.offlineBtn.querySelector('.offline-icon-check').hidden = state !== 'downloaded';
+  el.offlineBtn.querySelector('.offline-icon-spinner').hidden = state !== 'downloading';
+  el.offlineBtnLabel.textContent = label;
+}
+
+function updateOfflineButton() {
+  if (offlineDownloadInFlight) return; // don't clobber an in-progress download's UI
+  const source = el.sourceLang.value;
+  const target = el.targetLang.value;
+
+  if (source === 'auto') {
+    el.offlineBtn.hidden = true;
+    return;
+  }
+  el.offlineBtn.hidden = false;
+
+  const srcLabel = langLabel(source);
+  const tgtLabel = langLabel(target);
+
+  if (offline.isPairDownloaded(source, target)) {
+    setOfflineButtonState('downloaded', `${srcLabel} → ${tgtLabel} works offline`);
+  } else {
+    setOfflineButtonState('idle', `Download ${srcLabel} → ${tgtLabel} for offline`);
+  }
+}
+
+el.offlineBtn.addEventListener('click', async () => {
+  const source = el.sourceLang.value;
+  const target = el.targetLang.value;
+  const srcLabel = langLabel(source);
+  const tgtLabel = langLabel(target);
+
+  if (offline.isPairDownloaded(source, target)) {
+    if (!window.confirm(`Remove the offline ${srcLabel} → ${tgtLabel} model? Translation will use the online server again.`)) return;
+    offline.forgetPair(source, target);
+    updateOfflineButton();
+    return;
+  }
+
+  if (offlineDownloadInFlight) return;
+  offlineDownloadInFlight = true;
+  setOfflineButtonState('downloading', `Downloading ${tgtLabel}… 0%`);
+
+  try {
+    await offline.downloadPair(source, target, (p) => {
+      const pct = Math.round((p.pct || 0));
+      setOfflineButtonState('downloading', `Downloading ${tgtLabel}… ${pct}%`);
+    });
+    offlineDownloadInFlight = false;
+    updateOfflineButton();
+    showToast(`${tgtLabel} is ready to use offline`);
+    scheduleTranslate(); // if there's text sitting there, retranslate using the model that just finished
+  } catch (err) {
+    offlineDownloadInFlight = false;
+    setOfflineButtonState('error', `Couldn't download ${tgtLabel} — tap to retry`);
+    console.error('[offline]', err);
+  }
 });
 
 // ---------- Input handling ----------
@@ -175,11 +252,13 @@ function hideError() {
 
 function scheduleTranslate() {
   clearTimeout(debounceTimer);
-  if (!el.sourceText.value.trim()) {
+  const value = el.sourceText.value;
+  if (!value.trim()) {
     runTranslate(); // nothing to debounce — clear state right away
     return;
   }
-  debounceTimer = setTimeout(runTranslate, DEBOUNCE_MS);
+  const atWordBoundary = WORD_BOUNDARY_RE.test(value);
+  debounceTimer = setTimeout(runTranslate, atWordBoundary ? WORD_BOUNDARY_DEBOUNCE_MS : MID_WORD_DEBOUNCE_MS);
 }
 
 async function runTranslate() {
@@ -201,7 +280,10 @@ async function runTranslate() {
   setBusy(true);
 
   try {
-    const { translatedText, detectedLanguage } = await api.translateText({ text, source, target });
+    const useOffline = source !== 'auto' && offline.isPairDownloaded(source, target);
+    const { translatedText, detectedLanguage } = useOffline
+      ? { translatedText: await offline.translateOffline(source, target, text), detectedLanguage: null }
+      : await api.translateText({ text, source, target });
     if (token !== translateToken) return; // superseded by newer input/language change
 
     el.resultText.textContent = translatedText;
@@ -366,6 +448,7 @@ function restoreEntry(entry) {
   if (languageNames.has(entry.sourceLang)) el.sourceLang.value = entry.sourceLang;
   if (languageNames.has(entry.targetLang)) el.targetLang.value = entry.targetLang;
   persistLanguageChoice();
+  updateOfflineButton();
 
   el.sourceText.value = entry.sourceText;
   toggleClearButton();
@@ -500,6 +583,7 @@ async function init() {
   }
 
   await loadLanguages();
+  updateOfflineButton();
 
   allEntries = await db.getAllEntries();
   renderHistory();

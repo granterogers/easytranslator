@@ -1,5 +1,15 @@
 # Project conventions
 
+## Language defaults
+
+- Source language always resets to English on load — never restored from
+  a previous session. Target language is the one thing remembered
+  (`lt_last_target` in `localStorage`).
+- Translation fires on word boundaries (space/newline/punctuation) with a
+  short debounce, and a longer one mid-word (`WORD_BOUNDARY_DEBOUNCE_MS` /
+  `MID_WORD_DEBOUNCE_MS` in `js/main.js`) — the goal is visibly updating
+  word-by-word, not waiting for the user to stop typing entirely.
+
 ## Versioning
 
 - Single source of truth: `js/version.js` (`APP_VERSION`). Also duplicated
@@ -28,9 +38,39 @@
 
 ## Translation backend
 
-- `js/api.js` races several public LibreTranslate mirrors concurrently and
-  remembers whichever answered first (`CANDIDATE_ENDPOINTS`). Free public
-  instances are flaky — if translations start failing, that list is the
-  first thing to check/update.
+- `js/api.js`'s `CANDIDATE_ENDPOINTS` is **not a guessed list** — it's kept
+  in sync with the official mirror list at
+  https://github.com/LibreTranslate/Documentation
+  (`src/content/docs/community/mirrors.md`). A hardcoded list built from
+  training-data knowledge instead of that source went stale almost
+  immediately (most of a first attempt at this list were already dead).
+  If translations start failing, re-check that page before guessing new
+  URLs.
+- Steady state costs exactly one request (whichever mirror is cached in
+  `lt_endpoint_resolved` is tried alone); a dead mirror triggers a fan-out
+  race across the rest, and the new winner gets remembered.
 - Setting a server explicitly in Settings pins to exactly that one (no
   fallback), for people self-hosting or on their own known-good mirror.
+
+## Offline (on-device) translation
+
+- `js/translate-worker.js` runs `@xenova/transformers` (loaded from the
+  jsdelivr CDN, no bundler needed) in a Worker, using
+  `Xenova/opus-mt-{src}-{tgt}` ONNX models. `js/offline-models.js` is the
+  main-thread Promise-wrapper plus a `localStorage` record
+  (`lt_offline_pairs`) of which pairs the user explicitly opted to
+  download — never trigger a download without that opt-in, it costs tens
+  of MB of the user's data.
+- **This CDN + model-naming scheme could not be verified from the sandbox
+  this was built in** (huggingface.co and jsdelivr.net were both
+  unreachable from that environment — same class of problem as the
+  LibreTranslate mirror list above, just impossible to catch before
+  shipping this time). If offline downloads fail in the wild, check the
+  browser console for the actual error before assuming the plumbing is
+  broken — the CDN URL or model repo naming may have moved on, in which
+  case update `TRANSFORMERS_CDN_URL` / `modelIdFor()` in
+  `js/translate-worker.js`.
+- `js/main.js`'s `runTranslate()` uses the offline path automatically
+  whenever `offline.isPairDownloaded(source, target)` is true; everything
+  else (including `source === 'auto'`, which the offline button hides
+  itself for) falls through to the server path unchanged.

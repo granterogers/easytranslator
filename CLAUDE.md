@@ -51,6 +51,18 @@
   race across the rest, and the new winner gets remembered.
 - Setting a server explicitly in Settings pins to exactly that one (no
   fallback), for people self-hosting or on their own known-good mirror.
+- Above the LibreTranslate-mirror layer, `translateText()` in `js/api.js`
+  has a second, independent provider: MyMemory
+  (`translateViaMyMemory()`), a long-running public translation API that
+  doesn't share small community LibreTranslate mirrors' reliability
+  problems. Whichever provider actually worked last is remembered
+  (`lt_provider_resolved`) and tried first next time, same pattern as the
+  mirror memory above. MyMemory doesn't support `source === 'auto'` —
+  that combination is skipped, not attempted-then-failed, specifically so
+  its "unsupported" rejection can never overwrite LibreTranslate's more
+  useful error message when both are exhausted. A custom server pinned in
+  Settings bypasses this whole second layer — that's specifically a
+  LibreTranslate-protocol server, full stop, no MyMemory fallback.
 
 ## Offline (on-device) translation
 

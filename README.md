@@ -27,11 +27,16 @@ To install on iPhone: open the site in Safari, tap the Share icon, then
 ## Translation server
 
 By default the app races a couple of public, key-free LibreTranslate
-mirrors and remembers whichever answers. Free public mirrors are flaky —
-if translation stops working, open **Settings** (gear icon) and point it
-at a different LibreTranslate-compatible server, including one you
-self-host with `docker run -p 5000:5000 libretranslate/libretranslate`
-(the most reliable option, since it's entirely under your control).
+mirrors and remembers whichever answers; if both are down, it
+automatically falls back to [MyMemory](https://mymemory.translated.net/),
+a separate, independent public translation API with no key required.
+Whichever one actually works is remembered so it's tried first next time.
+If translation still isn't working, open **Settings** (gear icon) and
+point it at a specific LibreTranslate-compatible server, including one
+you self-host with `docker run -p 5000:5000 libretranslate/libretranslate`
+(the most reliable option, since it's entirely under your control — this
+opts out of the mirror race and the MyMemory fallback, using only the
+server you specified).
 
 ## Offline (on-device) translation
 

@@ -46,15 +46,14 @@
       <div class="field-block">
         <textarea id="sourceText" class="source-text" placeholder="Type or paste text to translate…" aria-label="Text to translate" autocapitalize="sentences" spellcheck="true"></textarea>
         <div class="field-meta">
+          <span id="statusLabel" class="status-label" hidden>
+            <span class="mini-spinner" aria-hidden="true"></span>
+            <span>Translating…</span>
+          </span>
           <span id="detectedLabel" class="detected-label" hidden></span>
           <button id="clearInputBtn" class="text-btn" type="button" hidden>Clear</button>
         </div>
       </div>
-
-      <button id="translateBtn" class="primary-btn" type="button">
-        <span class="btn-label">Translate</span>
-        <span class="spinner" hidden aria-hidden="true"></span>
-      </button>
 
       <div id="errorBanner" class="error-banner" role="alert" hidden></div>
 
@@ -126,6 +125,8 @@
     <hr class="sheet-divider">
 
     <button id="closeSettingsBtn" class="text-btn" type="button">Close</button>
+
+    <p class="version-tag" id="versionTag"></p>
   </div>
 </div>
 

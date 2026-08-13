@@ -1,8 +1,17 @@
 // App-shell service worker. Only caches this app's own static files so the
 // UI and saved history stay usable offline; translation requests always go
 // straight to the network (never cached, never intercepted here).
-
-const CACHE_NAME = 'translate-history-v1';
+//
+// Strategy is network-first with `cache: 'no-store'` for every shell file:
+// when online, each launch always fetches the current files straight from
+// GitHub Pages (bypassing the HTTP cache too, not just the SW cache) so a
+// new deploy is picked up immediately. The cache is purely an offline
+// fallback for when the network is unreachable.
+//
+// Keep APP_VERSION in sync with js/version.js (this file can't import it —
+// it runs as a classic worker script, not a module) — bump both on deploy.
+const APP_VERSION = '1.0.1';
+const CACHE_NAME = `translate-history-v${APP_VERSION}`;
 
 const APP_SHELL = [
   './',
@@ -11,6 +20,7 @@ const APP_SHELL = [
   './js/main.js',
   './js/db.js',
   './js/api.js',
+  './js/version.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
@@ -42,27 +52,15 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return; // never touch the translation API
 
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-          return res;
-        })
-        .catch(() => caches.match('./index.html'))
-    );
-    return;
-  }
+  const isNavigation = request.mode === 'navigate';
 
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request).then((res) => {
+    fetch(request, { cache: 'no-store' })
+      .then((res) => {
         const copy = res.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
         return res;
-      });
-    })
+      })
+      .catch(() => caches.match(request).then((cached) => cached || (isNavigation ? caches.match('./index.html') : undefined)))
   );
 });

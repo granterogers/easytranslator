@@ -217,16 +217,26 @@ button, input, select, textarea {
   cursor: default;
 }
 
-.spinner {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 2.5px solid rgba(4, 32, 28, 0.35);
-  border-top-color: var(--accent-contrast);
-  animation: spin 0.7s linear infinite;
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.status-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+.status-label[hidden] { display: none; }
+
+.mini-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+}
 
 /* ---------- Error ---------- */
 
@@ -536,6 +546,14 @@ button, input, select, textarea {
   border: none;
   border-top: 1px solid var(--border);
   margin: 20px 0 8px;
+}
+
+.version-tag {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-faint);
+  letter-spacing: 0.02em;
+  margin: 16px 0 4px;
 }
 
 /* ---------- Toast ---------- */

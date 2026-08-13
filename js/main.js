@@ -1,5 +1,8 @@
 import * as db from './db.js';
 import * as api from './api.js';
+import { APP_VERSION } from './version.js';
+
+const DEBOUNCE_MS = 600;
 
 const $ = (id) => document.getElementById(id);
 
@@ -8,9 +11,9 @@ const el = {
   targetLang: $('targetLang'),
   swapBtn: $('swapBtn'),
   sourceText: $('sourceText'),
+  statusLabel: $('statusLabel'),
   detectedLabel: $('detectedLabel'),
   clearInputBtn: $('clearInputBtn'),
-  translateBtn: $('translateBtn'),
   errorBanner: $('errorBanner'),
   resultBlock: $('resultBlock'),
   resultText: $('resultText'),
@@ -104,8 +107,14 @@ function persistLanguageChoice() {
   localStorage.setItem(LAST_TARGET_KEY, el.targetLang.value);
 }
 
-el.sourceLang.addEventListener('change', persistLanguageChoice);
-el.targetLang.addEventListener('change', persistLanguageChoice);
+function onLangChange() {
+  persistLanguageChoice();
+  clearTimeout(debounceTimer);
+  runTranslate();
+}
+
+el.sourceLang.addEventListener('change', onLangChange);
+el.targetLang.addEventListener('change', onLangChange);
 
 el.swapBtn.addEventListener('click', () => {
   if (el.sourceLang.value === 'auto') {
@@ -134,20 +143,25 @@ function toggleClearButton() {
   el.clearInputBtn.hidden = el.sourceText.value.length === 0;
 }
 
-el.sourceText.addEventListener('input', toggleClearButton);
+el.sourceText.addEventListener('input', () => {
+  toggleClearButton();
+  scheduleTranslate();
+});
 
 el.clearInputBtn.addEventListener('click', () => {
   el.sourceText.value = '';
   toggleClearButton();
   el.sourceText.focus();
+  scheduleTranslate();
 });
 
-// ---------- Translate ----------
+// ---------- Translate (live — fires automatically as you type) ----------
+
+let debounceTimer = null;
+let translateToken = 0;
 
 function setBusy(busy) {
-  el.translateBtn.disabled = busy;
-  el.translateBtn.querySelector('.spinner').hidden = !busy;
-  el.translateBtn.querySelector('.btn-label').textContent = busy ? 'Translating…' : 'Translate';
+  el.statusLabel.hidden = !busy;
 }
 
 function showError(message) {
@@ -159,21 +173,36 @@ function hideError() {
   el.errorBanner.hidden = true;
 }
 
-async function handleTranslate() {
-  const text = el.sourceText.value.trim();
-  if (!text) {
-    el.sourceText.focus();
+function scheduleTranslate() {
+  clearTimeout(debounceTimer);
+  if (!el.sourceText.value.trim()) {
+    runTranslate(); // nothing to debounce — clear state right away
     return;
   }
+  debounceTimer = setTimeout(runTranslate, DEBOUNCE_MS);
+}
 
-  hideError();
-  setBusy(true);
-
+async function runTranslate() {
+  const text = el.sourceText.value.trim();
   const source = el.sourceLang.value;
   const target = el.targetLang.value;
 
+  if (!text) {
+    translateToken += 1; // invalidate any in-flight request
+    setBusy(false);
+    hideError();
+    el.resultBlock.hidden = true;
+    el.detectedLabel.hidden = true;
+    return;
+  }
+
+  const token = (translateToken += 1);
+  hideError();
+  setBusy(true);
+
   try {
     const { translatedText, detectedLanguage } = await api.translateText({ text, source, target });
+    if (token !== translateToken) return; // superseded by newer input/language change
 
     el.resultText.textContent = translatedText;
     el.resultBlock.hidden = false;
@@ -199,20 +228,12 @@ async function handleTranslate() {
     allEntries.unshift(entry);
     renderHistory();
   } catch (err) {
+    if (token !== translateToken) return;
     showError(err.message || 'Translation failed. Please try again.');
   } finally {
-    setBusy(false);
+    if (token === translateToken) setBusy(false);
   }
 }
-
-el.translateBtn.addEventListener('click', handleTranslate);
-
-el.sourceText.addEventListener('keydown', (e) => {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-    e.preventDefault();
-    handleTranslate();
-  }
-});
 
 // ---------- Copy / Share ----------
 
@@ -339,6 +360,9 @@ function renderHistory() {
 }
 
 function restoreEntry(entry) {
+  clearTimeout(debounceTimer);
+  translateToken += 1; // invalidate any in-flight/pending translate
+
   if (languageNames.has(entry.sourceLang)) el.sourceLang.value = entry.sourceLang;
   if (languageNames.has(entry.targetLang)) el.targetLang.value = entry.targetLang;
   persistLanguageChoice();
@@ -426,7 +450,51 @@ async function loadLanguages() {
   populateLanguageSelects();
 }
 
+function initVersionTag() {
+  el.versionTag = $('versionTag');
+  if (el.versionTag) el.versionTag.textContent = `Translate History v${APP_VERSION}`;
+}
+
+// Keeps the installed app in step with whatever is on GitHub: any time a
+// new service worker takes over (because sw.js or a cached asset changed),
+// reload once so the tab is running the latest deployed code instead of a
+// stale cached copy.
+//
+// `clients.claim()` in sw.js fires `controllerchange` even the very first
+// time this client is ever controlled (install, not update) — reloading
+// on that would loop the very first visit. Only arm the reload-on-update
+// behavior when a controller already existed at load time, i.e. this is a
+// real redeploy, not first install. `reloaded` guards against a repeat.
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || !location.protocol.startsWith('http')) return;
+
+  const hadController = !!navigator.serviceWorker.controller;
+
+  const register = () => {
+    navigator.serviceWorker.register('./sw.js').then((reg) => {
+      reg.update().catch(() => {});
+    }).catch(() => {});
+  };
+
+  if (document.readyState === 'complete') {
+    register();
+  } else {
+    window.addEventListener('load', register, { once: true });
+  }
+
+  if (!hadController) return;
+
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
+}
+
 async function init() {
+  initVersionTag();
+
   if ('storage' in navigator && navigator.storage.persist) {
     navigator.storage.persist().catch(() => {});
   }
@@ -438,14 +506,7 @@ async function init() {
 
   toggleClearButton();
 
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-    const registerSW = () => navigator.serviceWorker.register('./sw.js').catch(() => {});
-    if (document.readyState === 'complete') {
-      registerSW();
-    } else {
-      window.addEventListener('load', registerSW, { once: true });
-    }
-  }
+  registerServiceWorker();
 }
 
 init();

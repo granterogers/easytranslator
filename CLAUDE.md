@@ -83,17 +83,22 @@
   itself for) falls through to the server path unchanged.
 - **Not every language pair has a published offline model** — Xenova
   converted a subset of Helsinki-NLP's opus-mt pairs to ONNX, not all of
-  them (confirmed live: `en-bg` 404s under this scheme; `en-es`, `en-fr`,
-  `ar-en`, `ru-en`, and others are confirmed to exist). Hugging Face
+  them (confirmed live: `en-bg` 404s under `Xenova/`; `en-es`, `en-fr`,
+  `ar-en`, `ru-en`, and others are confirmed to exist there). Hugging Face
   returns the exact string `"Unauthorized access to file"` both for
   private/gated repos and for ones that don't exist at all — `main.js`'s
   offline-download catch block matches that string and shows "isn't
   available for offline use yet" instead of a raw error, specifically
   because this is the expected, common case for a less-widely-spoken
-  language, not a bug to chase. If a language is confirmed missing here,
-  the eventual real fix is checking whether `onnx-community/opus-mt-*`
-  (the org Xenova's conversions are gradually migrating to) has it before
-  falling back to "not available."
+  language, not a bug to chase.
+  `translate-worker.js`'s `modelIdsFor()` tries `onnx-community/opus-mt-*`
+  as a second attempt when `Xenova/*` comes back missing — verified only
+  against a mocked module (same sandbox network restriction as above), not
+  against the real `onnx-community/opus-mt-en-bg` repo, so whether this
+  specific fallback actually resolves `en-bg` still needs a real-device
+  check. If a pair is missing from both orgs, it genuinely has no
+  published ONNX conversion anywhere either of us can find, not something
+  more retrying fixes.
 
 ## Startup performance
 

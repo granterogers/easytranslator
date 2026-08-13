@@ -52,8 +52,15 @@ async function loadTransformers() {
   }
 }
 
-function modelIdFor(src, tgt) {
-  return `Xenova/opus-mt-${src}-${tgt}`;
+// Xenova converted a subset of Helsinki-NLP's opus-mt pairs to ONNX under
+// their own account; some pairs missing there (confirmed live: en-bg) turn
+// up instead under `onnx-community`, the org Xenova's conversions are
+// gradually migrating to. Try both, in order, before giving up on a pair.
+function modelIdsFor(src, tgt) {
+  return [
+    `Xenova/opus-mt-${src}-${tgt}`,
+    `onnx-community/opus-mt-${src}-${tgt}`,
+  ];
 }
 
 // pairKey -> Promise<translator fn>, so concurrent requests for the same
@@ -68,9 +75,16 @@ function getPipeline(src, tgt, onProgress) {
       try {
         const { pipeline, env } = await loadTransformers();
         env.allowLocalModels = false;
-        return await pipeline('translation', modelIdFor(src, tgt), {
-          progress_callback: onProgress,
-        });
+
+        let lastErr;
+        for (const modelId of modelIdsFor(src, tgt)) {
+          try {
+            return await pipeline('translation', modelId, { progress_callback: onProgress });
+          } catch (err) {
+            lastErr = err;
+          }
+        }
+        throw lastErr;
       } catch (err) {
         pipelines.delete(key); // don't cache a failed load — allow retry
         throw err;

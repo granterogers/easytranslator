@@ -80,6 +80,23 @@
   plus a `localStorage` record (`lt_offline_pairs`) of which pairs the
   user explicitly opted to download — never trigger a download without
   that opt-in, it costs tens of MB of the user's data.
+- `#offlineBtn` (`updateOfflineButton()` in `js/main.js`) only ever shows
+  when the current pair is **not** downloaded — once
+  `offline.isPairDownloaded()` is true the button hides entirely rather
+  than sticking around as a "downloaded"/checkmark pill; the ✓ prefix on
+  the language dropdown options (`updateDownloadTicks()`) is the only
+  downloaded-state indicator left. There is deliberately no remaining UI
+  to manually forget/remove a downloaded pair.
+- Because hiding the button removes the user's only way back to a fresh
+  download, `runTranslate()` treats an offline-path failure as
+  self-healing rather than a dead end: if `translateOffline()` throws for
+  a pair recorded as downloaded (most likely because the browser evicted
+  the underlying Cache Storage entry under storage pressure — the
+  Bulgarian fallback alone is a few hundred MB, see NLLB note below),
+  it calls `offline.forgetPair()` and `refreshOfflineUI()` before
+  surfacing the error, so the button reappears immediately instead of
+  failing the same way on every future keystroke with no way to recover
+  short of clearing site data.
 - **This CDN + model-naming scheme cannot be verified from the sandbox
   this was built in** — its egress is restricted to GitHub only by
   explicit organization policy (confirmed via `/root/.ccr/README.md`'s

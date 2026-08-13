@@ -216,20 +216,23 @@ el.swapBtn.addEventListener('click', () => {
 let offlineDownloadInFlight = false;
 
 function setOfflineButtonState(state, label) {
-  el.offlineBtn.classList.toggle('is-downloaded', state === 'downloaded');
   el.offlineBtn.classList.toggle('is-error', state === 'error');
   el.offlineBtn.querySelector('.offline-icon-download').hidden = state !== 'idle' && state !== 'error';
-  el.offlineBtn.querySelector('.offline-icon-check').hidden = state !== 'downloaded';
   el.offlineBtn.querySelector('.offline-icon-spinner').hidden = state !== 'downloading';
   el.offlineBtnLabel.textContent = label;
 }
 
+// Once a pair is downloaded there's nothing left to tap — the ✓ in the
+// dropdown options (see updateDownloadTicks) is the only indicator needed,
+// so the button itself goes away rather than sticking around as a
+// "downloaded" pill. It reappears automatically if the pack goes missing
+// (see runTranslate's offline-path catch) so there's still a way back in.
 function updateOfflineButton() {
   if (offlineDownloadInFlight) return; // don't clobber an in-progress download's UI
   const source = el.sourceLang.value;
   const target = el.targetLang.value;
 
-  if (source === 'auto') {
+  if (source === 'auto' || offline.isPairDownloaded(source, target)) {
     el.offlineBtn.hidden = true;
     return;
   }
@@ -237,12 +240,7 @@ function updateOfflineButton() {
 
   const srcLabel = langLabel(source);
   const tgtLabel = langLabel(target);
-
-  if (offline.isPairDownloaded(source, target)) {
-    setOfflineButtonState('downloaded', `${srcLabel} → ${tgtLabel} works offline`);
-  } else {
-    setOfflineButtonState('idle', `Download ${srcLabel} → ${tgtLabel} for offline`);
-  }
+  setOfflineButtonState('idle', `Download ${srcLabel} → ${tgtLabel} for offline`);
 }
 
 // Marks each dropdown option with a ✓ when downloading it (paired with
@@ -274,15 +272,7 @@ function refreshOfflineUI() {
 el.offlineBtn.addEventListener('click', async () => {
   const source = el.sourceLang.value;
   const target = el.targetLang.value;
-  const srcLabel = langLabel(source);
   const tgtLabel = langLabel(target);
-
-  if (offline.isPairDownloaded(source, target)) {
-    if (!window.confirm(`Remove the offline ${srcLabel} → ${tgtLabel} model? Translation will use the online server again.`)) return;
-    offline.forgetPair(source, target);
-    refreshOfflineUI();
-    return;
-  }
 
   if (offlineDownloadInFlight) return;
   offlineDownloadInFlight = true;
@@ -379,9 +369,25 @@ async function runTranslate() {
 
   try {
     const useOffline = source !== 'auto' && offline.isPairDownloaded(source, target);
-    let { translatedText, detectedLanguage } = useOffline
-      ? { translatedText: await offline.translateOffline(source, target, text), detectedLanguage: null }
-      : await api.translateText({ text, source, target });
+    let translatedText;
+    let detectedLanguage;
+    if (useOffline) {
+      try {
+        translatedText = await offline.translateOffline(source, target, text);
+        detectedLanguage = null;
+      } catch (offlineErr) {
+        // The pack was recorded as downloaded, but the underlying model
+        // files are gone (e.g. evicted by the browser under storage
+        // pressure — the Bulgarian fallback model alone is a few hundred
+        // MB). Forget it and let the button reappear instead of failing
+        // the same way on every future keystroke with no way back in.
+        offline.forgetPair(source, target);
+        refreshOfflineUI();
+        throw new Error(`The offline pack for ${langLabel(target)} is no longer available — tap "Download for offline" to get it again.`);
+      }
+    } else {
+      ({ translatedText, detectedLanguage } = await api.translateText({ text, source, target }));
+    }
     if (token !== translateToken) return; // superseded by newer input/language change
 
     // Bulgarian is shown romanized, not in Cyrillic — readable without

@@ -63,59 +63,22 @@ function modelIdsFor(src, tgt) {
   ];
 }
 
-// Last resort for a pair with no dedicated bilingual model anywhere findable
-// (confirmed: en-bg): NLLB-200, Meta's single model covering 200 languages
-// including ones the small per-pair opus-mt catalog never got around to.
-// Real tradeoff, not hidden from the UI: this is a much bigger download
-// than the ~40-90MB bilingual models — a few hundred MB — since it's one
-// general-purpose model instead of a small pair-specific one. It uses
-// FLORES-200 codes (e.g. "eng_Latn", "bul_Cyrl") rather than plain ISO
-// codes, passed at translate-call time rather than baked into the model
-// id, so unlike the bilingual models above, ALL pairs share the same
-// downloaded model — downloading it once for en→bg also covers, say,
-// en→ro for free.
-const NLLB_MODEL_ID = 'Xenova/nllb-200-distilled-600M';
-const FLORES_CODES = {
-  en: 'eng_Latn', bg: 'bul_Cyrl', es: 'spa_Latn', fr: 'fra_Latn', de: 'deu_Latn',
-  it: 'ita_Latn', pt: 'por_Latn', ru: 'rus_Cyrl', uk: 'ukr_Cyrl', pl: 'pol_Latn',
-  nl: 'nld_Latn', el: 'ell_Grek', tr: 'tur_Latn', ar: 'arb_Arab', he: 'heb_Hebr',
-  hi: 'hin_Deva', ja: 'jpn_Jpan', ko: 'kor_Hang', zh: 'zho_Hans', vi: 'vie_Latn',
-  th: 'tha_Thai', ro: 'ron_Latn', hu: 'hun_Latn', cs: 'ces_Latn', sk: 'slk_Latn',
-  sv: 'swe_Latn', da: 'dan_Latn', fi: 'fin_Latn', id: 'ind_Latn', fa: 'pes_Arab',
-  sq: 'als_Latn', ur: 'urd_Arab', bn: 'ben_Beng', sl: 'slv_Latn', hr: 'hrv_Latn',
-  et: 'est_Latn', lv: 'lvs_Latn', lt: 'lit_Latn', ka: 'kat_Geor', az: 'azj_Latn',
-  eu: 'eus_Latn', ca: 'cat_Latn', gl: 'glg_Latn', ga: 'gle_Latn', ms: 'zsm_Latn',
-  tl: 'tgl_Latn', nb: 'nob_Latn',
-};
+// There used to be a last-resort fallback here for pairs with no dedicated
+// bilingual model (confirmed missing: en-bg): NLLB-200, Meta's 200-language
+// model, a few hundred MB of weights instead of the ~40-90MB bilingual
+// models. Removed after being confirmed on a real device to crash mobile
+// Safari mid-download — the WebView's memory limit can't absorb that much
+// model data, and there's no way to fix that from page code. A pair with no
+// small dedicated model now just reports "not available for offline use"
+// (see modelIdsFor's callers) rather than attempting a download that
+// reliably takes the whole app down with it.
 
 // pairKey -> Promise<translator fn>, so concurrent requests for the same
 // pair share one download/load instead of racing duplicate ones, and a
-// pair already loaded this session is reused instantly. NLLB is cached
-// under its own fixed key ('__nllb__') since it's one shared model serving
-// every pair, not a per-pair one.
+// pair already loaded this session is reused instantly.
 const pipelines = new Map();
 
-function getNllbTranslator(onProgress) {
-  const key = '__nllb__';
-  if (!pipelines.has(key)) {
-    pipelines.set(key, (async () => {
-      try {
-        const { pipeline, env } = await loadTransformers();
-        env.allowLocalModels = false;
-        return await pipeline('translation', NLLB_MODEL_ID, { progress_callback: onProgress });
-      } catch (err) {
-        pipelines.delete(key);
-        throw err;
-      }
-    })());
-  }
-  return pipelines.get(key);
-}
-
-// Always resolves to a plain `(text) => Promise<output>` callable — the
-// caller doesn't need to know whether it ended up backed by a small
-// bilingual model or the shared NLLB one; that difference (NLLB needs
-// src_lang/tgt_lang passed at call time) is wrapped away right here.
+// Always resolves to a plain `(text) => Promise<output>` callable.
 function getPipeline(src, tgt, onProgress) {
   const key = `${src}:${tgt}`;
   if (!pipelines.has(key)) {
@@ -134,17 +97,6 @@ function getPipeline(src, tgt, onProgress) {
           }
         }
 
-        const srcFlores = FLORES_CODES[src];
-        const tgtFlores = FLORES_CODES[tgt];
-        if (srcFlores && tgtFlores) {
-          try {
-            const fn = await getNllbTranslator(onProgress);
-            return (text) => fn(text, { src_lang: srcFlores, tgt_lang: tgtFlores });
-          } catch (err) {
-            lastErr = err;
-          }
-        }
-
         throw lastErr;
       } catch (err) {
         pipelines.delete(key); // don't cache a failed load — allow retry
@@ -155,16 +107,67 @@ function getPipeline(src, tgt, onProgress) {
   return pipelines.get(key);
 }
 
+// A model download is several files (tokenizer, config, weights, ...)
+// fetched concurrently, each reporting its own independent 0-100 progress.
+// Reporting whichever file's event arrived most recently made the download
+// percentage look "all over the place" — it would drop back toward 0 every
+// time a tiny config file started downloading right after the multi-MB
+// weights file was mostly done.
+//
+// Byte totals are only reliable for files fetched with a Content-Length
+// (the actual model weights) — small metadata files often report a bare
+// percentage with no byte count at all. So: once any file has reported real
+// byte counts, sum loaded/total bytes across every such file and use that
+// — it's naturally weighted by actual size, so a finished 2KB tokenizer
+// file barely moves the needle next to a 90MB weights file, instead of
+// counting for an equal 50% share of the average the way a naive per-file
+// average would. Only fall back to averaging bare percentages when no file
+// has reported byte counts yet.
+function makeAggregateProgress(onAggregate) {
+  const byBytes = new Map(); // file -> { loaded, total }
+  const byPercent = new Map(); // file -> 0..1, only used until byBytes has an entry
+  return (p) => {
+    if (!p || !p.file) return;
+    if (p.status === 'done') {
+      const existing = byBytes.get(p.file);
+      if (existing) byBytes.set(p.file, { loaded: existing.total, total: existing.total });
+      else byPercent.set(p.file, 1);
+    } else if (p.status === 'progress') {
+      const hasBytes = typeof p.loaded === 'number' && typeof p.total === 'number' && p.total > 0;
+      if (hasBytes) {
+        byBytes.set(p.file, { loaded: p.loaded, total: p.total });
+      } else if (typeof p.progress === 'number') {
+        byPercent.set(p.file, Math.max(0, Math.min(1, p.progress / 100)));
+      } else {
+        return;
+      }
+    } else {
+      return; // 'initiate' etc — nothing measurable to report yet
+    }
+
+    let pct;
+    if (byBytes.size > 0) {
+      let loadedSum = 0;
+      let totalSum = 0;
+      for (const { loaded, total } of byBytes.values()) { loadedSum += loaded; totalSum += total; }
+      pct = totalSum > 0 ? (loadedSum / totalSum) * 100 : 0;
+    } else {
+      const values = [...byPercent.values()];
+      pct = values.length ? (values.reduce((sum, v) => sum + v, 0) / values.length) * 100 : 0;
+    }
+    onAggregate(pct);
+  };
+}
+
 self.onmessage = async (event) => {
   const { id, type, src, tgt, text } = event.data;
 
   try {
     if (type === 'warmup') {
-      await getPipeline(src, tgt, (p) => {
-        if (p.status === 'progress') {
-          self.postMessage({ id, type: 'progress', pct: p.progress || 0, file: p.file });
-        }
+      const reportProgress = makeAggregateProgress((pct) => {
+        self.postMessage({ id, type: 'progress', pct });
       });
+      await getPipeline(src, tgt, reportProgress);
       self.postMessage({ id, type: 'ready' });
     } else if (type === 'translate') {
       const translator = await getPipeline(src, tgt);

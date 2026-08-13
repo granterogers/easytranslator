@@ -91,9 +91,8 @@
   download, `runTranslate()` treats an offline-path failure as
   self-healing rather than a dead end: if `translateOffline()` throws for
   a pair recorded as downloaded (most likely because the browser evicted
-  the underlying Cache Storage entry under storage pressure — the
-  Bulgarian fallback alone is a few hundred MB, see NLLB note below),
-  it calls `offline.forgetPair()` and `refreshOfflineUI()` before
+  the underlying Cache Storage entry under storage pressure), it calls
+  `offline.forgetPair()` and `refreshOfflineUI()` before
   surfacing the error, so the button reappears immediately instead of
   failing the same way on every future keystroke with no way to recover
   short of clearing site data.
@@ -132,15 +131,28 @@
   against a mocked module (same sandbox network restriction as above), not
   against the real `onnx-community/opus-mt-en-bg` repo, so whether this
   specific fallback actually resolves `en-bg` still needs a real-device
-  check. If both bilingual orgs come back missing, `getPipeline()` falls
-  through to `Xenova/nllb-200-distilled-600M` — Meta's 200-language model
-  — as a last resort, using FLORES-200 codes (`FLORES_CODES`) rather than
-  ISO ones, passed at call time rather than baked into the model id (one
-  shared download covers every pair NLLB supports, not just one). This is
-  a much bigger download than the bilingual models (a few hundred MB vs.
-  tens) — a real tradeoff, not hidden from the user, just the only
-  remaining lever for a pair with no dedicated model anywhere findable.
-  Same caveat as above: verified via mocks only, not the real repo.
+  check. If both bilingual orgs come back missing, the pair simply isn't
+  offered offline — **there used to be a further fallback here** to
+  `Xenova/nllb-200-distilled-600M` (Meta's 200-language model, using
+  FLORES-200 codes so one shared download covered every pair it supports),
+  but it was removed after being confirmed on a real device to crash
+  mobile Safari mid-download: a several-hundred-MB general-purpose model
+  is more than the WebView's memory budget can absorb, and that isn't
+  fixable from page code. Don't reintroduce a giant-multilingual-model
+  fallback without a real-device story for the memory ceiling — a pair
+  with no compact dedicated model stays server-only, and that's the
+  correct behavior now, not a gap to fill back in.
+- A model download is several files (tokenizer, config, weights, ...)
+  fetched concurrently, each with its own independent 0-100 progress
+  event — reporting whichever file's event arrived last made the download
+  percentage look "all over the place," dropping back toward 0 every time
+  a new file started while another was already mostly done.
+  `translate-worker.js`'s `makeAggregateProgress()` tracks every file's own
+  completion fraction (bytes loaded/total when the event has them, its own
+  reported percentage otherwise) and reports the average across all files
+  seen so far — this only trends upward, since each file's tracked fraction
+  never decreases. Don't go back to forwarding a single file's raw
+  progress value as the download percentage.
 
 ## Bulgarian is shown romanized
 

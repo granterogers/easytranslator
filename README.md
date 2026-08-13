@@ -49,14 +49,16 @@ to download a small neural translation model for the current language
 pair. Once downloaded, that pair translates instantly with zero network
 calls — works on a plane, works if every public mirror is down. Models
 are cached by the browser (tens of MB per pair), so this is a one-time
-download per pair, not per session. Tap the pill again once downloaded to
-remove it.
+download per pair, not per session. The pill disappears once a pair is
+downloaded — a ✓ next to the language name in the dropdowns is the only
+remaining indicator.
 
 Language pairs without a downloaded model keep using the server path
-above automatically. For a pair with no dedicated model published anywhere
-(Bulgarian, at least, as of writing), the app falls back to a single
-much-larger multilingual model covering 200 languages — a real tradeoff
-in download size, but the only way to get that language offline at all.
+above automatically. A pair with no dedicated model published anywhere
+(Bulgarian, at least, as of writing) isn't offered offline at all — an
+earlier version fell back to a single much-larger multilingual model, but
+that fallback was removed after it was confirmed to crash mobile Safari
+mid-download; that language keeps working over the server instead.
 
 ## Project layout
 

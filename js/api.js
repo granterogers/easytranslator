@@ -17,6 +17,10 @@ const CANDIDATE_ENDPOINTS = [
   'https://libretranslate.de',
   'https://lt.vern.cc',
   'https://translate.fortytwo-it.com',
+  'https://libretranslate.pussthecat.org',
+  'https://translate.terraprint.co',
+  'https://translate.fedilab.app',
+  'https://trans.zillyhuhn.com',
 ];
 
 const REQUEST_TIMEOUT_MS = 8000;
@@ -111,6 +115,14 @@ async function parseErrorMessage(res) {
   return `Server responded with ${res.status}`;
 }
 
+function hostOf(url) {
+  try {
+    return new URL(url).host;
+  } catch (_) {
+    return url;
+  }
+}
+
 async function attempt(base, path, options) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -118,6 +130,13 @@ async function attempt(base, path, options) {
     const res = await fetch(`${base}${path}`, { ...options, signal: controller.signal });
     if (!res.ok) throw new Error(await parseErrorMessage(res));
     return { base, res };
+  } catch (err) {
+    // Tag with which mirror + why, so a total failure can report specifics
+    // instead of a single opaque "unreachable" message.
+    const reason = controller.signal.aborted ? 'timed out' : (err.message || 'network error');
+    const tagged = new Error(`${hostOf(base)}: ${reason}`);
+    tagged.base = base;
+    throw tagged;
   } finally {
     clearTimeout(timer);
   }
@@ -136,7 +155,8 @@ async function raceEndpoints(path, options) {
     try {
       const { res } = await attempt(custom, path, options);
       return res;
-    } catch (_) {
+    } catch (err) {
+      console.error('[translate] custom server failed:', err.message);
       throw new Error(`Could not reach ${custom}. Check the server URL in Settings, or reset to the default.`);
     }
   }
@@ -146,7 +166,9 @@ async function raceEndpoints(path, options) {
     try {
       const { res } = await attempt(resolved, path, options);
       return res;
-    } catch (_) { /* fall through to racing the rest */ }
+    } catch (err) {
+      console.warn('[translate] resolved mirror failed, falling back:', err.message);
+    }
   }
 
   const remaining = CANDIDATE_ENDPOINTS.filter((b) => b !== resolved);
@@ -154,8 +176,11 @@ async function raceEndpoints(path, options) {
     const { base, res } = await Promise.any(remaining.map((b) => attempt(b, path, options)));
     rememberResolved(base);
     return res;
-  } catch (_) {
-    throw new Error('Could not reach any translation server. Check your connection, or set a specific server in Settings.');
+  } catch (aggregate) {
+    const reasons = (aggregate.errors || []).map((e) => e.message);
+    console.error('[translate] all mirrors failed:', reasons);
+    const detail = reasons.length ? ` (${reasons.join('; ')})` : '';
+    throw new Error(`Could not reach any translation server${detail}. Check your connection, or set a specific server in Settings.`);
   }
 }
 

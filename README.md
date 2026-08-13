@@ -13,6 +13,9 @@ translation saved automatically to a searchable local history.
   If neither is available for a pair, a small bundled word-for-word
   dictionary kicks in as a last resort (see below).
 - Bulgarian output is shown romanized (Latin script), not Cyrillic.
+- A small copy icon sits on the translated text — tap it to copy the
+  result to your clipboard. The input box has a matching small clear
+  (✕) icon in its corner instead of a separate "Clear" text link.
 - Both language dropdowns always show your most recently used languages
   first, and mark any language that already has a downloaded offline
   pair with a ✓.
@@ -48,14 +51,15 @@ screen to pin a specific one manually, it's fully automatic.
 
 ## Offline (on-device) translation
 
-Tap the pill below the language row ("Download {language} for offline")
-to download a small neural translation model for the current language
-pair. Once downloaded, that pair translates instantly with zero network
-calls — works on a plane, works if every public mirror is down. Models
-are cached by the browser (tens of MB per pair), so this is a one-time
-download per pair, not per session. The pill disappears once a pair is
-downloaded — a ✓ next to the language name in the dropdowns is the only
-remaining indicator.
+Tap the small download icon next to the language row's collapse arrow to
+download a small neural translation model for the current language pair
+(hover or long-press it to see which pair it'll download). Once
+downloaded, that pair translates instantly with zero network calls —
+works on a plane, works if every public mirror is down. Models are cached
+by the browser (tens of MB per pair), so this is a one-time download per
+pair, not per session. The icon disappears once a pair is downloaded — a
+✓ next to the language name in the dropdowns is the only remaining
+indicator.
 
 Language pairs without a downloaded model keep using the server path
 above automatically. A pair with no dedicated model published anywhere

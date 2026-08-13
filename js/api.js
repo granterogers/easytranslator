@@ -176,6 +176,14 @@ async function translateViaLibreTranslate(text, source, target) {
   };
 }
 
+// MyMemory's documented free/anonymous-tier limit — requests over this are
+// NOT cleanly rejected, they come back HTTP 200 with a silently truncated
+// translation, which reads as "the app didn't translate everything I typed"
+// with no error to explain why. Guarded in translateText() below by
+// skipping MyMemory entirely past this length, the same "unsupported, not
+// attempted-then-failed" treatment already used for source === 'auto'.
+const MYMEMORY_MAX_CHARS = 500;
+
 // MyMemory (https://mymemory.translated.net) is a long-running, genuinely
 // independent public translation API — not a small community-run
 // LibreTranslate mirror, so it doesn't share their reliability problems.
@@ -215,6 +223,38 @@ async function translateViaMyMemory(text, source, target) {
 // just from a single provider instead of a pool of them. Response shape
 // verified against public documentation of this well-known endpoint, not
 // a live call (this dev sandbox's egress is restricted to GitHub only).
+// Multi-sentence (or multi-line) input comes back as multiple segments, one
+// per sentence Google's own segmenter split the source into — naively
+// joining segment[0] values with '' loses whatever whitespace/newlines sat
+// between them in the original, which reads as sentences run together or
+// line breaks silently disappearing compared to the real Google Translate
+// app. Each segment also carries its original-language chunk (segment[1]),
+// so this locates that chunk in the real source text and copies the exact
+// gap that was actually there (spaces, newlines, punctuation) verbatim
+// between translated chunks, instead of assuming there was none.
+function reassembleSegments(text, segments) {
+  let cursor = 0;
+  let result = '';
+  for (const seg of segments) {
+    if (!Array.isArray(seg)) continue;
+    const translated = seg[0] || '';
+    const original = seg[1] || '';
+    const idx = original ? text.indexOf(original, cursor) : -1;
+    if (idx !== -1) {
+      result += text.slice(cursor, idx);
+      result += translated;
+      cursor = idx + original.length;
+    } else {
+      // Couldn't locate this chunk's original position (defensive fallback,
+      // not expected in practice) — still separate it with a space rather
+      // than jamming words together with no boundary at all.
+      if (result && translated && !/\s$/.test(result) && !/^\s/.test(translated)) result += ' ';
+      result += translated;
+    }
+  }
+  return result;
+}
+
 async function translateViaGoogleUnofficial(text, source, target) {
   const sl = source === 'auto' ? 'auto' : source;
   const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${target}&dt=t&q=${encodeURIComponent(text)}`;
@@ -227,7 +267,7 @@ async function translateViaGoogleUnofficial(text, source, target) {
     // Shape: [[[translatedChunk, originalChunk, ...], ...], null, detectedSourceLang, ...]
     const segments = Array.isArray(data) ? data[0] : null;
     if (!Array.isArray(segments)) throw new Error('Unexpected Google response shape');
-    const translatedText = segments.map((seg) => (Array.isArray(seg) ? seg[0] : '') || '').join('');
+    const translatedText = reassembleSegments(text, segments);
     if (!translatedText) throw new Error('Empty translation from Google');
     const detectedLanguage = source === 'auto' && typeof data[2] === 'string' ? data[2] : null;
     return { translatedText, detectedLanguage };
@@ -249,7 +289,11 @@ export async function translateText({ text, source, target }) {
   const providers = [
     { id: 'google', supported: true, run: () => translateViaGoogleUnofficial(text, source, target) },
     { id: 'libretranslate', supported: true, run: () => translateViaLibreTranslate(text, source, target) },
-    { id: 'mymemory', supported: source !== 'auto', run: () => translateViaMyMemory(text, source, target) },
+    {
+      id: 'mymemory',
+      supported: source !== 'auto' && text.length <= MYMEMORY_MAX_CHARS,
+      run: () => translateViaMyMemory(text, source, target),
+    },
   ];
   const preferred = localStorage.getItem(PROVIDER_KEY);
   if (preferred) providers.sort((a, b) => (a.id === preferred ? -1 : b.id === preferred ? 1 : 0));

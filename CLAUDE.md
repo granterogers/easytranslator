@@ -80,6 +80,27 @@
   live call (this dev sandbox's egress is restricted to GitHub only) — if
   it starts failing, check whether Google changed the response shape
   before assuming it's just rate-limited.
+- `MYMEMORY_MAX_CHARS` (500) guards against MyMemory's documented
+  free/anonymous-tier limit — a request over that length doesn't error,
+  it comes back HTTP 200 with a **silently truncated** translation, which
+  looks exactly like "the app didn't translate everything I typed" with
+  no error to explain why. Guarded the same way as `source === 'auto'`:
+  MyMemory is marked `unsupported` for long text and skipped, not
+  attempted-then-failed, so a longer message falls through to Google or
+  LibreTranslate (neither of which shares this specific limit) instead of
+  quietly losing its tail end.
+- Google's response for multi-sentence (or multi-line) input comes back as
+  multiple segments, one per sentence — `reassembleSegments()` locates
+  each segment's original-language chunk (`segment[1]`) in the real source
+  text and copies the *actual* gap between chunks (spaces, newlines,
+  whatever was really there) into the output, rather than the naive
+  `segments.map(s => s[0]).join('')` this replaced, which silently
+  dropped whatever whitespace sat between sentences — sentences would run
+  together or line breaks would vanish compared to the real Google
+  Translate app. Falls back to inserting a single space between chunks
+  only if a chunk's original text can't be located verbatim in the
+  source (not expected in practice, but better than jamming words
+  together with zero boundary).
 - There is no Settings screen, so no way to pin a custom server manually
   — the app only ever picks automatically between the providers above. If
   self-hosting support is ever needed again, that's a feature to
@@ -224,6 +245,26 @@
   longer (stepped, not a formula) so a full sentence stays visible above
   the keyboard instead of scrolling off; called everywhere `resultText` is
   set (translate, restore-from-history, swap).
+- Icon-only controls, deliberately not text buttons/pills: `#clearInputBtn`
+  (an X-in-circle absolutely positioned inside `.source-text-wrap`, top-right
+  corner of the textarea — same pattern as native iOS text fields) and
+  `#copyResultBtn` (same positioning, inside `.result-text-wrap`, copies
+  `resultText.textContent` via `navigator.clipboard.writeText()` with a
+  toast for success/failure). Both `.source-text` and `.result-text` carry
+  extra right padding (`44px`) so real text content never renders under
+  the floating icon. `#offlineBtn` is the same idea at a smaller size
+  (30px, sitting in `.lang-toggle-row` next to the collapse chevron
+  instead of as its own full-width pill below the language row) — its
+  descriptive text moved from a visible label into `title`/`aria-label`
+  (screen readers and desktop hover still get it), and since a hover-only
+  title is invisible on a touch device, `setOfflineButtonState()`'s error
+  case additionally fires a toast so the message is still actually seen.
+  The live download percentage during a download shows in a small badge
+  (`#offlineBtnBadge`, same visual pattern as the History tab's count
+  badge, but a separate self-contained CSS rule — it does NOT share the
+  `.badge` class, because that class is defined later in the stylesheet
+  and its position rules would win the cascade over an identically-specific
+  earlier rule).
 
 ## Language dropdown ordering
 

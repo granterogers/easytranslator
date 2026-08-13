@@ -22,7 +22,7 @@ const el = {
   targetLang: $('targetLang'),
   swapBtn: $('swapBtn'),
   offlineBtn: $('offlineBtn'),
-  offlineBtnLabel: $('offlineBtnLabel'),
+  offlineBtnBadge: $('offlineBtnBadge'),
   sourceText: $('sourceText'),
   statusLabel: $('statusLabel'),
   detectedLabel: $('detectedLabel'),
@@ -30,6 +30,7 @@ const el = {
   errorBanner: $('errorBanner'),
   resultBlock: $('resultBlock'),
   resultText: $('resultText'),
+  copyResultBtn: $('copyResultBtn'),
   dictNote: $('dictNote'),
   viewTranslate: $('view-translate'),
   viewHistory: $('view-history'),
@@ -218,11 +219,17 @@ el.swapBtn.addEventListener('click', () => {
 
 let offlineDownloadInFlight = false;
 
-function setOfflineButtonState(state, label) {
+// The button is a small icon now, not a text pill — the full descriptive
+// label lives in title/aria-label (for hover/screen readers) instead of
+// visible text; the badge only ever shows the live download percentage.
+function setOfflineButtonState(state, label, pct) {
   el.offlineBtn.classList.toggle('is-error', state === 'error');
-  el.offlineBtn.querySelector('.offline-icon-download').hidden = state !== 'idle' && state !== 'error';
+  el.offlineBtn.title = label;
+  el.offlineBtn.setAttribute('aria-label', label);
+  el.offlineBtn.querySelector('.offline-icon-download').hidden = state === 'downloading';
   el.offlineBtn.querySelector('.offline-icon-spinner').hidden = state !== 'downloading';
-  el.offlineBtnLabel.textContent = label;
+  el.offlineBtnBadge.hidden = state !== 'downloading';
+  if (state === 'downloading') el.offlineBtnBadge.textContent = String(Math.round(pct || 0));
 }
 
 // Once a pair is downloaded there's nothing left to tap — the ✓ in the
@@ -279,12 +286,12 @@ el.offlineBtn.addEventListener('click', async () => {
 
   if (offlineDownloadInFlight) return;
   offlineDownloadInFlight = true;
-  setOfflineButtonState('downloading', `Downloading ${tgtLabel}… 0%`);
+  setOfflineButtonState('downloading', `Downloading ${tgtLabel}… 0%`, 0);
 
   try {
     await offline.downloadPair(source, target, (p) => {
       const pct = Math.round((p.pct || 0));
-      setOfflineButtonState('downloading', `Downloading ${tgtLabel}… ${pct}%`);
+      setOfflineButtonState('downloading', `Downloading ${tgtLabel}… ${pct}%`, pct);
     });
     offlineDownloadInFlight = false;
     refreshOfflineUI();
@@ -301,7 +308,23 @@ el.offlineBtn.addEventListener('click', async () => {
       ? `${tgtLabel} isn't available for offline use yet — translation keeps working online`
       : `Couldn't download ${tgtLabel}: ${message.slice(0, 120) || 'unknown error'} — tap to retry`;
     setOfflineButtonState('error', label);
+    // The button is icon-only now, so a hover-only title wouldn't be seen
+    // on a touch device — a toast makes sure the error is actually noticed.
+    showToast(label);
     console.error('[offline]', err);
+  }
+});
+
+// ---------- Copy translated text ----------
+
+el.copyResultBtn.addEventListener('click', async () => {
+  const text = el.resultText.textContent;
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Copied');
+  } catch (err) {
+    showToast('Could not copy');
   }
 });
 

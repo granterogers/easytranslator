@@ -28,9 +28,16 @@
     <!-- TRANSLATE VIEW -->
     <section id="view-translate" class="view" data-view="translate">
 
-      <button id="langToggleBtn" class="lang-toggle-btn" type="button" aria-expanded="true" aria-controls="langRow" aria-label="Hide language selectors">
-        <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
-      </button>
+      <div class="lang-toggle-row">
+        <button id="langToggleBtn" class="lang-toggle-btn" type="button" aria-expanded="true" aria-controls="langRow" aria-label="Hide language selectors">
+          <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
+        </button>
+        <button id="offlineBtn" class="offline-btn" type="button" aria-label="Download for offline use" title="Download for offline use">
+          <svg class="offline-icon offline-icon-download" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.59l3.3-3.3 1.4 1.42L12 17.42l-4.7-4.71 1.4-1.42 3.3 3.3V3h2zM5 19h14v2H5v-2z"/></svg>
+          <span class="mini-spinner offline-icon-spinner" aria-hidden="true" hidden></span>
+          <span id="offlineBtnBadge" class="offline-badge" hidden></span>
+        </button>
+      </div>
 
       <div class="lang-row" id="langRow">
         <select id="sourceLang" class="lang-select" aria-label="Source language"></select>
@@ -40,28 +47,31 @@
         <select id="targetLang" class="lang-select" aria-label="Target language"></select>
       </div>
 
-      <button id="offlineBtn" class="offline-btn" type="button">
-        <svg class="offline-icon offline-icon-download" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.59l3.3-3.3 1.4 1.42L12 17.42l-4.7-4.71 1.4-1.42 3.3 3.3V3h2zM5 19h14v2H5v-2z"/></svg>
-        <span class="mini-spinner offline-icon-spinner" aria-hidden="true" hidden></span>
-        <span id="offlineBtnLabel">Download for offline use</span>
-      </button>
-
       <div class="field-block">
-        <textarea id="sourceText" class="source-text" placeholder="Type or paste text to translate…" aria-label="Text to translate" autocapitalize="sentences" spellcheck="true"></textarea>
+        <div class="source-text-wrap">
+          <textarea id="sourceText" class="source-text" placeholder="Type or paste text to translate…" aria-label="Text to translate" autocapitalize="sentences" spellcheck="true"></textarea>
+          <button id="clearInputBtn" class="clear-btn" type="button" aria-label="Clear text" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm4.3 13.3-1.4 1.4L12 13.9l-2.9 2.9-1.4-1.4L10.6 12.5 7.7 9.6l1.4-1.4L12 11.1l2.9-2.9 1.4 1.4L13.4 12.5l2.9 2.8z"/></svg>
+          </button>
+        </div>
         <div class="field-meta">
           <span id="statusLabel" class="status-label" hidden>
             <span class="mini-spinner" aria-hidden="true"></span>
             <span>Translating…</span>
           </span>
           <span id="detectedLabel" class="detected-label" hidden></span>
-          <button id="clearInputBtn" class="text-btn" type="button" hidden>Clear</button>
         </div>
       </div>
 
       <div id="errorBanner" class="error-banner" role="alert" hidden></div>
 
       <div class="field-block result-block" id="resultBlock" hidden>
-        <div class="result-text" id="resultText" tabindex="0" aria-live="polite"></div>
+        <div class="result-text-wrap">
+          <div class="result-text" id="resultText" tabindex="0" aria-live="polite"></div>
+          <button id="copyResultBtn" class="copy-btn" type="button" aria-label="Copy translation">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
+          </button>
+        </div>
         <p id="dictNote" class="dict-note" hidden>Offline word dictionary — approximate, not a full translation</p>
       </div>
 

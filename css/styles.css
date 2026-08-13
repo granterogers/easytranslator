@@ -86,13 +86,19 @@ button, input, select, textarea {
 
 /* ---------- Language row ---------- */
 
+.lang-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
 .lang-toggle-btn {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
   min-height: 28px;
-  margin-bottom: 2px;
   background: none;
   border: none;
   cursor: pointer;
@@ -149,40 +155,56 @@ button, input, select, textarea {
 .offline-btn[hidden] { display: none; }
 
 .offline-btn {
+  position: relative;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 40px;
-  margin: 0 0 14px;
-  padding: 8px 14px;
-  border-radius: 999px;
+  border-radius: 50%;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
-  color: var(--text-dim);
-  font-size: 13px;
-  font-weight: 600;
   cursor: pointer;
 }
 
 .offline-btn:active { background: var(--border); }
 
-.offline-btn.is-error {
-  border-color: rgba(248, 113, 113, 0.4);
-  color: var(--danger);
-}
+.offline-btn.is-error { border-color: rgba(248, 113, 113, 0.4); }
+.offline-btn.is-error .offline-icon-download { fill: var(--danger); }
 
-.offline-icon { width: 16px; height: 16px; flex-shrink: 0; }
-.offline-icon-download { fill: var(--text-dim); }
+.offline-icon { width: 15px; height: 15px; flex-shrink: 0; fill: var(--text-dim); }
 .offline-icon[hidden] { display: none; }
 
-.offline-icon-spinner { width: 14px; height: 14px; flex-shrink: 0; }
+.offline-icon-spinner { width: 13px; height: 13px; flex-shrink: 0; }
 .offline-icon-spinner[hidden] { display: none; }
+
+.offline-badge[hidden] { display: none; }
+
+.offline-badge {
+  position: absolute;
+  bottom: -3px;
+  right: -3px;
+  min-width: 15px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 8px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 
 /* ---------- Text fields ---------- */
 
 .field-block { margin-bottom: 14px; }
+
+.source-text-wrap { position: relative; }
 
 .source-text {
   width: 100%;
@@ -192,17 +214,38 @@ button, input, select, textarea {
   border: 1px solid var(--border);
   background: var(--bg-input);
   color: var(--text);
-  padding: 14px;
+  padding: 14px 44px 14px 14px;
   font-size: 18px;
   line-height: 1.35;
 }
 
 .source-text::placeholder { color: var(--text-faint); }
 
+.clear-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.clear-btn[hidden] { display: none; }
+.clear-btn svg { width: 18px; height: 18px; fill: var(--text-faint); }
+.clear-btn:active svg { fill: var(--danger); }
+
 .field-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
   min-height: 28px;
   padding: 6px 4px 0;
 }
@@ -263,12 +306,14 @@ button, input, select, textarea {
 
 .result-block { margin-top: 14px; }
 
+.result-text-wrap { position: relative; }
+
 .result-text {
   min-height: 60px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--bg-elevated);
-  padding: 14px 16px;
+  padding: 14px 44px 14px 16px;
   font-size: 22px; /* default — js/main.js overrides inline, shrinking as the translation gets longer */
   line-height: 1.3;
   font-weight: 600;
@@ -276,6 +321,26 @@ button, input, select, textarea {
   word-break: break-word;
   transition: font-size 0.1s ease;
 }
+
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.copy-btn svg { width: 16px; height: 16px; fill: var(--text-dim); }
+.copy-btn:active svg { fill: var(--accent); }
 
 .dict-note {
   margin: 8px 4px 0;

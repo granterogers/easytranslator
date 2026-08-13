@@ -30,6 +30,7 @@ const el = {
   resultBlock: $('resultBlock'),
   resultText: $('resultText'),
   micBtn: $('micBtn'),
+  micHint: $('micHint'),
   viewTranslate: $('view-translate'),
   viewHistory: $('view-history'),
   historyList: $('historyList'),
@@ -63,6 +64,10 @@ function showToast(message) {
 
 // ---------- Tabs ----------
 
+// Set by setupSpeechRecognition() once at startup — whether the custom
+// push-to-talk button actually works in this browser/context at all.
+let micAvailable = true;
+
 function activateTab(target) {
   el.tabBtns.forEach((btn) => {
     const active = btn.dataset.target === target;
@@ -71,7 +76,9 @@ function activateTab(target) {
   });
   el.viewTranslate.hidden = target !== 'translate';
   el.viewHistory.hidden = target !== 'history';
-  el.micBtn.hidden = target !== 'translate';
+  const onTranslate = target === 'translate';
+  el.micBtn.hidden = !onTranslate || !micAvailable;
+  el.micHint.hidden = !onTranslate || micAvailable;
   el.views.scrollTop = 0;
 }
 
@@ -336,12 +343,30 @@ el.clearInputBtn.addEventListener('click', () => {
 //
 // Uses the browser's built-in SpeechRecognition — no API key, no server of
 // ours involved. Hold the mic button to listen, release to stop, like a
-// walkie-talkie. KNOWN CAVEAT, undisclosed until tested for real: iOS
-// Safari's support for SpeechRecognition inside an installed ("Add to
-// Home Screen") standalone PWA has a history of being unreliable even
-// when it works fine in an ordinary Safari tab — if the mic button does
-// nothing when installed, try it in a plain Safari tab first to tell
-// those two cases apart.
+// walkie-talkie.
+//
+// CONFIRMED (not just suspected) via multiple independent iOS developer
+// reports: webkitSpeechRecognition works in an ordinary Safari tab but
+// fails with a "service-not-allowed" error once the same page is
+// installed via "Add to Home Screen" — Apple's standalone-PWA sandbox
+// restricts microphone-based Speech Recognition specifically in that
+// mode, and there is no fix available from page code; it's an OS-level
+// restriction, not a bug in this app. Detected via `isStandaloneDisplay()`
+// and the button is hidden before ever attempting `.start()` there, with
+// `#micHint` pointing at the one thing that reliably works in every
+// context instead: the iOS keyboard's own built-in dictation mic, which
+// isn't a web API at all and so isn't subject to this restriction.
+//
+// Also self-heals for whatever's left over (Siri/Dictation disabled in
+// Settings, other iOS-version-specific quirks reported in the wild): if
+// `.start()` ever actually fails with 'service-not-allowed' or
+// 'not-allowed', the button permanently hides itself in favor of the
+// hint rather than staying present and silently failing on every future
+// press.
+function isStandaloneDisplay() {
+  return window.navigator.standalone === true
+    || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+}
 
 const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -362,9 +387,15 @@ let recognition = null;
 let recognizing = false;
 let speechBaseText = '';
 
+function disableMicPermanently() {
+  micAvailable = false;
+  el.micBtn.hidden = true;
+  el.micHint.hidden = el.viewTranslate.hidden;
+}
+
 function setupSpeechRecognition() {
-  if (!SpeechRecognitionCtor) {
-    el.micBtn.hidden = true;
+  if (!SpeechRecognitionCtor || isStandaloneDisplay()) {
+    disableMicPermanently();
     return;
   }
 
@@ -392,7 +423,13 @@ function setupSpeechRecognition() {
 
   recognition.onerror = (event) => {
     stopRecording();
-    if (event.error !== 'no-speech' && event.error !== 'aborted') {
+    if (event.error === 'service-not-allowed' || event.error === 'not-allowed') {
+      // Confirmed broken for this session (standalone-mode restriction we
+      // didn't otherwise detect, Dictation disabled in Settings, etc.) —
+      // stop offering a button that demonstrably doesn't work here.
+      disableMicPermanently();
+      showToast('Speech input isn’t available here — try the mic on your keyboard instead');
+    } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
       showToast(`Speech recognition error: ${event.error}`);
     }
   };

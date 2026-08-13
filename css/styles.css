@@ -441,6 +441,26 @@ button, input, select, textarea {
 
 .mic-btn.recording svg { fill: #fff; }
 
+.mic-hint {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--tabbar-height) + var(--safe-bottom) + 14px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - 48px);
+  margin: 0;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 13px;
+  text-align: center;
+  z-index: 8;
+}
+
+.mic-hint[hidden] { display: none; }
+
 /* ---------- Tab bar ---------- */
 
 .tabbar {

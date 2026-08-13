@@ -9,7 +9,10 @@ translation saved automatically to a searchable local history.
   the keyboard.
 - Push-to-talk speech input — hold the mic button and speak, like a
   walkie-talkie, using the browser's built-in speech recognition (no API
-  key).
+  key). Not available once installed to the iOS home screen (Apple
+  restricts this specifically for standalone PWAs) — the app detects that
+  and points to the iOS keyboard's own dictation mic instead, which works
+  everywhere.
 - Two translation paths: a public [LibreTranslate](https://libretranslate.com/)
   server (**no API key required**) by default, or an on-device model you
   download once per language pair for instant, fully offline translation.

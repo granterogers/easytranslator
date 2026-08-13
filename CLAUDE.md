@@ -138,15 +138,30 @@
 - `js/main.js`'s mic button uses the browser's built-in `SpeechRecognition`
   (no API key, no server). Press-and-hold, not toggle:
   touchstart/mousedown calls `startRecording()`, touchend/mouseup/
-  mouseleave calls `stopRecording()`. Hidden entirely via feature
-  detection when the constructor doesn't exist.
-- **Untested on a real device, and there's a specific known risk worth
-  flagging proactively this time**: iOS Safari's `SpeechRecognition`
-  support has a documented history of being unreliable specifically
-  inside an installed ("Add to Home Screen") standalone PWA even when it
-  works fine in an ordinary Safari tab. If the mic button does nothing
-  once installed, testing it in a plain Safari tab first will tell you
-  whether that's this known limitation or something else.
+  mouseleave calls `stopRecording()`.
+- **Confirmed on a real device** (not just suspected): iOS Safari throws
+  `service-not-allowed` for `webkitSpeechRecognition` specifically inside
+  an installed ("Add to Home Screen") standalone PWA, even though the
+  identical code works in an ordinary Safari tab — corroborated by
+  multiple independent iOS developer reports of the exact same pattern.
+  This is Apple's standalone-PWA sandbox restricting microphone-based
+  Speech Recognition, not fixable from page code. `isStandaloneDisplay()`
+  detects this up front (`navigator.standalone` / `display-mode:
+  standalone`) and hides the mic button before ever calling `.start()`
+  there, replacing it with `#micHint` pointing at the one thing that
+  reliably works in every context: the iOS keyboard's own built-in
+  dictation mic, which isn't a web API and so isn't subject to this
+  restriction at all.
+- Also self-heals for whatever standalone-mode detection doesn't catch
+  (Siri/Dictation disabled in Settings, other iOS-version quirks reported
+  in the wild): a live `service-not-allowed` or `not-allowed` error from
+  `.start()` permanently hides the button in favor of the hint
+  (`disableMicPermanently()`) rather than leaving a control present that
+  demonstrably fails on every future press.
+- `micAvailable` (not just checking the button's own `hidden` state) is
+  what `activateTab()` consults when switching back to the Translate tab
+  — don't reintroduce a bug where switching tabs makes a
+  permanently-disabled mic button reappear.
 - Starting a new recording while a translation is already showing clears
   the input/output first (`startRecording()`'s `resultBlock.hidden` check)
   — a fresh press means "start over," not "append to the old one."

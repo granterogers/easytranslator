@@ -81,6 +81,19 @@
   whenever `offline.isPairDownloaded(source, target)` is true; everything
   else (including `source === 'auto'`, which the offline button hides
   itself for) falls through to the server path unchanged.
+- **Not every language pair has a published offline model** — Xenova
+  converted a subset of Helsinki-NLP's opus-mt pairs to ONNX, not all of
+  them (confirmed live: `en-bg` 404s under this scheme; `en-es`, `en-fr`,
+  `ar-en`, `ru-en`, and others are confirmed to exist). Hugging Face
+  returns the exact string `"Unauthorized access to file"` both for
+  private/gated repos and for ones that don't exist at all — `main.js`'s
+  offline-download catch block matches that string and shows "isn't
+  available for offline use yet" instead of a raw error, specifically
+  because this is the expected, common case for a less-widely-spoken
+  language, not a bug to chase. If a language is confirmed missing here,
+  the eventual real fix is checking whether `onnx-community/opus-mt-*`
+  (the org Xenova's conversions are gradually migrating to) has it before
+  falling back to "not available."
 
 ## Startup performance
 

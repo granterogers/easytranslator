@@ -219,8 +219,15 @@ el.offlineBtn.addEventListener('click', async () => {
     scheduleTranslate(); // if there's text sitting there, retranslate using the model that just finished
   } catch (err) {
     offlineDownloadInFlight = false;
-    const reason = (err && err.message) ? String(err.message).slice(0, 120) : 'unknown error';
-    setOfflineButtonState('error', `Couldn't download ${tgtLabel}: ${reason} — tap to retry`);
+    const message = (err && err.message) || '';
+    // Hugging Face returns this exact wording both for private/gated repos
+    // and for ones that simply don't exist — in practice here it means no
+    // one has published an offline model for this specific language pair,
+    // not a connection problem retrying would fix.
+    const label = /unauthorized access to file/i.test(message)
+      ? `${tgtLabel} isn't available for offline use yet — translation keeps working online`
+      : `Couldn't download ${tgtLabel}: ${message.slice(0, 120) || 'unknown error'} — tap to retry`;
+    setOfflineButtonState('error', label);
     console.error('[offline]', err);
   }
 });

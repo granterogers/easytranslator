@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Translate History</title>
+<meta name="description" content="Fast, private translation with automatic local history. No accounts, no backend, works offline for your saved history.">
+
+<meta name="theme-color" content="#0f172a">
+<meta name="color-scheme" content="dark">
+
+<!-- iOS PWA / Safari home screen support -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Translate">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+
+<link rel="icon" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <h1 class="brand">Translate History</h1>
+    <button id="settingsBtn" class="icon-btn" type="button" aria-label="Settings" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94a7.14 7.14 0 0 0 .06-.94 7.14 7.14 0 0 0-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.14.56-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.62-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.3.6.22l2.39-.96c.49.38 1.04.7 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.24 1.14-.56 1.63-.94l2.39.96c.22.08.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+    </button>
+  </header>
+
+  <main class="views">
+
+    <!-- TRANSLATE VIEW -->
+    <section id="view-translate" class="view" data-view="translate">
+
+      <div class="lang-row">
+        <select id="sourceLang" class="lang-select" aria-label="Source language"></select>
+        <button id="swapBtn" class="icon-btn swap-btn" type="button" aria-label="Swap languages">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h11l-3-3 1.4-1.4L21.8 8l-5.4 5.4L15 12l3-3H7V7zm10 10H6l3 3-1.4 1.4L2.2 16l5.4-5.4L9 12l-3 3h11v2z"/></svg>
+        </button>
+        <select id="targetLang" class="lang-select" aria-label="Target language"></select>
+      </div>
+
+      <div class="field-block">
+        <textarea id="sourceText" class="source-text" placeholder="Type or paste text to translate…" aria-label="Text to translate" autocapitalize="sentences" spellcheck="true"></textarea>
+        <div class="field-meta">
+          <span id="detectedLabel" class="detected-label" hidden></span>
+          <button id="clearInputBtn" class="text-btn" type="button" hidden>Clear</button>
+        </div>
+      </div>
+
+      <button id="translateBtn" class="primary-btn" type="button">
+        <span class="btn-label">Translate</span>
+        <span class="spinner" hidden aria-hidden="true"></span>
+      </button>
+
+      <div id="errorBanner" class="error-banner" role="alert" hidden></div>
+
+      <div class="field-block result-block" id="resultBlock" hidden>
+        <div class="result-text" id="resultText" tabindex="0" aria-live="polite"></div>
+        <div class="result-actions">
+          <button id="copyBtn" class="action-btn" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
+            <span>Copy</span>
+          </button>
+          <button id="shareBtn" class="action-btn" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 1 0-3-3c0 .24.04.47.09.7L7.04 9.81A3 3 0 1 0 5 15.19l7.12 4.15c-.05.21-.08.43-.08.66a3 3 0 1 0 3-3z"/></svg>
+            <span>Share</span>
+          </button>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- HISTORY VIEW -->
+    <section id="view-history" class="view" data-view="history" hidden>
+
+      <div class="history-toolbar">
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="search-icon"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 5L20.49 19l-5-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+          <input id="searchInput" type="search" placeholder="Search history…" aria-label="Search history" enterkeyhint="search">
+        </div>
+        <button id="clearAllBtn" class="text-btn danger" type="button">Clear all</button>
+      </div>
+
+      <ul id="historyList" class="history-list"></ul>
+
+      <p id="historyEmpty" class="empty-state" hidden>No translations yet.<br>Your history will appear here.</p>
+      <p id="historyNoResults" class="empty-state" hidden>No matches found.</p>
+
+    </section>
+
+  </main>
+
+  <nav class="tabbar" role="tablist" aria-label="Sections">
+    <button class="tab-btn active" data-target="translate" role="tab" aria-selected="true" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.87 15.07l-2.54-2.51.03-.03A17.5 17.5 0 0 0 14.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/></svg>
+      <span>Translate</span>
+    </button>
+    <button class="tab-btn" data-target="history" role="tab" aria-selected="false" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 1 1 2.05 4.95l-1.42 1.42A9 9 0 1 0 13 3zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+      <span>History</span>
+      <span id="historyCountBadge" class="badge" hidden>0</span>
+    </button>
+  </nav>
+
+</div>
+
+<!-- SETTINGS SHEET -->
+<div id="settingsSheet" class="sheet-overlay" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <h2 id="settingsTitle">Settings</h2>
+
+    <label class="sheet-label" for="endpointInput">LibreTranslate server URL</label>
+    <input id="endpointInput" class="sheet-input" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://translate.example.com">
+    <p class="sheet-hint">No API key needed. Use the default public server, or point this at any LibreTranslate instance (including one you self-host).</p>
+
+    <div class="sheet-row">
+      <button id="resetEndpointBtn" class="text-btn" type="button">Reset to default</button>
+      <button id="saveEndpointBtn" class="primary-btn small" type="button">Save</button>
+    </div>
+
+    <hr class="sheet-divider">
+
+    <button id="closeSettingsBtn" class="text-btn" type="button">Close</button>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

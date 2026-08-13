@@ -17,8 +17,9 @@
   ES modules from a classic script scope) — **keep both in sync**.
 - Bump the patch number on every push to GitHub (e.g. `1.0.1` → `1.0.2`).
   Bump minor/major only for deliberately larger changes, at your judgment.
-- The version is shown subtly in the Settings sheet (`#versionTag` in
-  `index.html`), not anywhere prominent in the main UI.
+- There's no Settings screen — the version is shown subtly at the bottom
+  of the History view instead (`#versionTag` in `index.html`, below the
+  history list/empty-state), not anywhere prominent in the main UI.
 - After actually pushing, end the reply's very last line with
   `Pushed to GitHub vX.X.X` (nothing after it) so it's visible without
   scrolling up. Only write it once the push has actually succeeded.
@@ -49,8 +50,6 @@
 - Steady state costs exactly one request (whichever mirror is cached in
   `lt_endpoint_resolved` is tried alone); a dead mirror triggers a fan-out
   race across the rest, and the new winner gets remembered.
-- Setting a server explicitly in Settings pins to exactly that one (no
-  fallback), for people self-hosting or on their own known-good mirror.
 - Above the LibreTranslate-mirror layer, `translateText()` in `js/api.js`
   has a second, independent provider: MyMemory
   (`translateViaMyMemory()`), a long-running public translation API that
@@ -60,9 +59,11 @@
   mirror memory above. MyMemory doesn't support `source === 'auto'` —
   that combination is skipped, not attempted-then-failed, specifically so
   its "unsupported" rejection can never overwrite LibreTranslate's more
-  useful error message when both are exhausted. A custom server pinned in
-  Settings bypasses this whole second layer — that's specifically a
-  LibreTranslate-protocol server, full stop, no MyMemory fallback.
+  useful error message when both are exhausted.
+- There is no Settings screen, so no way to pin a custom server manually
+  — the app only ever picks automatically between the mirrors above and
+  MyMemory. If self-hosting support is ever needed again, that's a
+  feature to reintroduce deliberately, not a removed-by-accident gap.
 
 ## Offline (on-device) translation
 
@@ -152,18 +153,45 @@
 
 ## UI layout
 
-- No app header — removed along with the title, to save vertical space for
-  reading translations next to the keyboard. The settings button lives in
-  the tab bar instead (`#settingsBtn`, styled like a tab but excluded from
-  `tabBtns` — see the comment at that array — since it opens a sheet
-  rather than switching views).
+- No app header, no Settings screen — removed entirely to save vertical
+  space and simplify the app down to two tabs (Translate, History). The
+  version tag moved to the bottom of History (see Versioning above).
 - The language row is collapsible (`#langToggleBtn` / `#langRow`) for the
-  same reason; state isn't persisted across launches, always starts
+  same space reason; state isn't persisted across launches, always starts
   expanded.
 - `js/main.js`'s `fitResultFontSize()` shrinks the result text as it gets
   longer (stepped, not a formula) so a full sentence stays visible above
   the keyboard instead of scrolling off; called everywhere `resultText` is
   set (translate, restore-from-history, swap).
+
+## Language dropdown ordering
+
+- Both dropdowns always show recently-used languages first. `js/main.js`
+  keeps an MRU list (`lt_recent_languages` in `localStorage`, capped at
+  `MAX_RECENT_LANGUAGES`) and `sortByRecentlyUsed()` stable-sorts the
+  option list against it on every render — ties (anything not recently
+  used) keep their original alphabetical order.
+- **Recording is deliberately asymmetric between source and target** —
+  `onLangChange()` only records whichever one the user actually just
+  changed, not both. Recording both on every change was tried first and
+  was a real bug: since source is "English" almost permanently, it kept
+  getting bumped to the #2 recent slot on every single target switch,
+  crowding out the far more useful "recently used target" signal
+  entirely. `restoreEntry()` applies the same restraint (records target
+  unconditionally, source only if it isn't `'en'`); `swapBtn`'s handler
+  is the one deliberate exception — a swap makes both languages equally
+  "just used," so it records both.
+- Downloaded offline pairs get a ✓ prefix on the relevant option's text
+  (`updateDownloadTicks()`) — checked against the *other* dropdown's
+  current value (target options check `isPairDownloaded(source, code)`
+  and vice versa), so the tick reflects "would picking this complete an
+  already-downloaded pair," not some standalone per-language state.
+  Rewrites existing `<option>` text nodes in place rather than rebuilding
+  the `<select>`, so it doesn't disturb scroll position or a picker that's
+  mid-interaction. `refreshOfflineUI()` bundles this with
+  `updateOfflineButton()` so both stay in sync — call that, not
+  `updateOfflineButton()` alone, from any new code path that changes
+  languages or download state.
 
 ## Startup performance
 

@@ -14,8 +14,11 @@ translation saved automatically to a searchable local history.
   server (**no API key required**) by default, or an on-device model you
   download once per language pair for instant, fully offline translation.
 - Bulgarian output is shown romanized (Latin script), not Cyrillic.
-- Minimal chrome — no header, and the language row can be collapsed to
-  make more room for reading.
+- Both language dropdowns always show your most recently used languages
+  first, and mark any language that already has a downloaded offline
+  pair with a ✓.
+- Minimal chrome — no header, no Settings screen, and the language row
+  can be collapsed to make more room for reading.
 - History is stored locally in **IndexedDB** and persists forever on the
   device until you delete it.
 - Installable as a PWA, optimized for iPhone Safari, dark mode only.
@@ -39,12 +42,8 @@ mirrors and remembers whichever answers; if both are down, it
 automatically falls back to [MyMemory](https://mymemory.translated.net/),
 a separate, independent public translation API with no key required.
 Whichever one actually works is remembered so it's tried first next time.
-If translation still isn't working, open **Settings** (gear icon) and
-point it at a specific LibreTranslate-compatible server, including one
-you self-host with `docker run -p 5000:5000 libretranslate/libretranslate`
-(the most reliable option, since it's entirely under your control — this
-opts out of the mirror race and the MyMemory fallback, using only the
-server you specified).
+There's no Settings screen to point this at a different server — it's
+fully automatic.
 
 ## Offline (on-device) translation
 
@@ -73,8 +72,8 @@ in download size, but the only way to get that language offline at all.
 - `js/translate-worker.js` — runs the on-device model in a Worker so
   downloading/inference never blocks the UI
 - `js/transliterate.js` — Cyrillic→Latin romanization for Bulgarian
-- `js/main.js` — UI wiring: tabs, translate flow, history, settings,
-  offline-download button, push-to-talk mic
+- `js/main.js` — UI wiring: tabs, translate flow, history,
+  offline-download button, push-to-talk mic, recent-language ordering
 - `sw.js` — service worker caching the app shell for offline use
 - `manifest.webmanifest` — PWA install metadata
 - `icons/` — app icons (source/regen instructions in `scripts/icon-source.html`)
@@ -82,6 +81,7 @@ in download size, but the only way to get that language offline at all.
 ## Privacy
 
 No data ever leaves your device except the text you choose to translate,
-which is sent directly from your browser to whichever LibreTranslate
-server you've configured. There is no analytics, no accounts, and no
+which is sent directly from your browser to whichever translation service
+answered last (see Translation server above) — or nowhere at all, for a
+downloaded offline pair. There is no analytics, no accounts, and no
 server of ours in the loop.

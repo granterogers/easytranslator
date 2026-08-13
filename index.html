@@ -83,6 +83,8 @@
       <p id="historyEmpty" class="empty-state" hidden>No translations yet.<br>Your history will appear here.</p>
       <p id="historyNoResults" class="empty-state" hidden>No matches found.</p>
 
+      <p class="version-tag" id="versionTag"></p>
+
     </section>
 
   </main>
@@ -101,35 +103,8 @@
       <span>History</span>
       <span id="historyCountBadge" class="badge" hidden>0</span>
     </button>
-    <button id="settingsBtn" class="tab-btn" type="button" aria-label="Settings" aria-haspopup="dialog">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94a7.14 7.14 0 0 0 .06-.94 7.14 7.14 0 0 0-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.14.56-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.62-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.3.6.22l2.39-.96c.49.38 1.04.7 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.24 1.14-.56 1.63-.94l2.39.96c.22.08.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
-      <span>Settings</span>
-    </button>
   </nav>
 
-</div>
-
-<!-- SETTINGS SHEET -->
-<div id="settingsSheet" class="sheet-overlay" hidden>
-  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
-    <div class="sheet-handle" aria-hidden="true"></div>
-    <h2 id="settingsTitle">Settings</h2>
-
-    <label class="sheet-label" for="endpointInput">LibreTranslate server URL</label>
-    <input id="endpointInput" class="sheet-input" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://translate.example.com">
-    <p class="sheet-hint">No API key needed. Use the default public server, or point this at any LibreTranslate instance (including one you self-host).</p>
-
-    <div class="sheet-row">
-      <button id="resetEndpointBtn" class="text-btn" type="button">Reset to default</button>
-      <button id="saveEndpointBtn" class="primary-btn small" type="button">Save</button>
-    </div>
-
-    <hr class="sheet-divider">
-
-    <button id="closeSettingsBtn" class="text-btn" type="button">Close</button>
-
-    <p class="version-tag" id="versionTag"></p>
-  </div>
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

@@ -9,18 +9,14 @@
 // https://github.com/LibreTranslate/Documentation (docs/community/mirrors),
 // not a guessed/hardcoded set — that page is the source of truth going
 // forward, since third-party mirrors that seemed fine at any one point in
-// time regularly disappear. Setting an explicit server in Settings opts
-// out of this and pins to exactly that server.
+// time regularly disappear.
 
-const CUSTOM_ENDPOINT_KEY = 'lt_endpoint_custom';
 const RESOLVED_ENDPOINT_KEY = 'lt_endpoint_resolved';
 
 const CANDIDATE_ENDPOINTS = [
   'https://translate.cutie.dating',
   'https://translate.fedilab.app',
 ];
-
-export const DEFAULT_ENDPOINT = CANDIDATE_ENDPOINTS[0];
 
 const REQUEST_TIMEOUT_MS = 8000;
 
@@ -79,35 +75,12 @@ export const FALLBACK_LANGUAGES = [
   { code: 'vi', name: 'Vietnamese' },
 ];
 
-function normalizeBase(url) {
-  return url.trim().replace(/\/+$/, '');
-}
-
-function getCustomEndpoint() {
-  const v = localStorage.getItem(CUSTOM_ENDPOINT_KEY);
-  return v ? normalizeBase(v) : null;
-}
-
 function getResolvedEndpoint() {
   return localStorage.getItem(RESOLVED_ENDPOINT_KEY);
 }
 
 function rememberResolved(base) {
   localStorage.setItem(RESOLVED_ENDPOINT_KEY, base);
-}
-
-// The endpoint currently in effect — shown in Settings.
-export function getEndpoint() {
-  return getCustomEndpoint() || getResolvedEndpoint() || DEFAULT_ENDPOINT;
-}
-
-export function setEndpoint(url) {
-  localStorage.setItem(CUSTOM_ENDPOINT_KEY, normalizeBase(url));
-}
-
-export function resetEndpoint() {
-  localStorage.removeItem(CUSTOM_ENDPOINT_KEY);
-  localStorage.removeItem(RESOLVED_ENDPOINT_KEY);
 }
 
 async function parseErrorMessage(res) {
@@ -150,20 +123,7 @@ async function attempt(base, path, options) {
 // that just went down) do we fan out and race the rest concurrently, so a
 // dead mirror never blocks a working one — and pay that extra cost only
 // once, since the newly-resolved winner gets remembered for next time.
-// Pinning a custom server in Settings skips all of this: that one server,
-// no fallback, no fan-out.
 async function raceEndpoints(path, options) {
-  const custom = getCustomEndpoint();
-  if (custom) {
-    try {
-      const { res } = await attempt(custom, path, options);
-      return res;
-    } catch (err) {
-      console.error('[translate] custom server failed:', err.message);
-      throw new Error(`Could not reach ${custom}. Check the server URL in Settings, or reset to the default.`);
-    }
-  }
-
   const resolved = getResolvedEndpoint();
   let resolvedFailure = null;
   if (resolved) {
@@ -188,7 +148,7 @@ async function raceEndpoints(path, options) {
     ];
     console.error('[translate] all mirrors failed:', reasons);
     const detail = reasons.length ? ` (${reasons.join('; ')})` : '';
-    throw new Error(`Could not reach any translation server${detail}. Check your connection, or set a specific server in Settings.`);
+    throw new Error(`Could not reach any translation server${detail}. Check your connection and try again.`);
   }
 }
 
@@ -246,14 +206,8 @@ const PROVIDER_KEY = 'lt_provider_resolved';
 
 // Two independent providers, tried in whichever order worked last time (so
 // once one proves reliable for this user, we go straight to it instead of
-// re-trying a known-dead one on every call). A custom server pinned in
-// Settings bypasses this entirely — that's an explicit choice to use only
-// that LibreTranslate-compatible server, full stop.
+// re-trying a known-dead one on every call).
 export async function translateText({ text, source, target }) {
-  if (getCustomEndpoint()) {
-    return translateViaLibreTranslate(text, source, target);
-  }
-
   const providers = [
     { id: 'libretranslate', supported: true, run: () => translateViaLibreTranslate(text, source, target) },
     { id: 'mymemory', supported: source !== 'auto', run: () => translateViaMyMemory(text, source, target) },

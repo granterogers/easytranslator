@@ -38,21 +38,14 @@ const el = {
   searchInput: $('searchInput'),
   clearAllBtn: $('clearAllBtn'),
   historyCountBadge: $('historyCountBadge'),
-  // Excludes settingsBtn deliberately — it shares the .tab-btn look but
-  // isn't a view-switching tab (no data-target), it opens the settings
-  // sheet instead. Including it here would make activateTab(undefined)
-  // fire on click and hide both views.
   tabBtns: Array.from(document.querySelectorAll('.tab-btn[data-target]')),
-  settingsBtn: $('settingsBtn'),
-  settingsSheet: $('settingsSheet'),
-  endpointInput: $('endpointInput'),
-  saveEndpointBtn: $('saveEndpointBtn'),
-  resetEndpointBtn: $('resetEndpointBtn'),
-  closeSettingsBtn: $('closeSettingsBtn'),
   toast: $('toast'),
+  versionTag: $('versionTag'),
 };
 
 const LAST_TARGET_KEY = 'lt_last_target';
+const RECENT_LANGUAGES_KEY = 'lt_recent_languages';
+const MAX_RECENT_LANGUAGES = 8;
 
 let languages = [];
 let languageNames = new Map();
@@ -107,12 +100,50 @@ function computeFallbackTarget() {
   return languages[0] ? languages[0].code : 'en';
 }
 
+// ---------- Most-recently-used language ordering ----------
+
+function getRecentLanguages() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(RECENT_LANGUAGES_KEY) || '[]');
+    return Array.isArray(raw) ? raw : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+// Bumps each given code to the front of the MRU list (most recent last
+// argument wins the #1 spot), deduped, capped so the list doesn't grow
+// forever. 'auto' is never a real language pick, so it's never recorded.
+function recordRecentLanguages(...codes) {
+  const recent = getRecentLanguages();
+  for (const code of codes) {
+    if (!code || code === 'auto') continue;
+    const existingIndex = recent.indexOf(code);
+    if (existingIndex !== -1) recent.splice(existingIndex, 1);
+    recent.unshift(code);
+  }
+  localStorage.setItem(RECENT_LANGUAGES_KEY, JSON.stringify(recent.slice(0, MAX_RECENT_LANGUAGES)));
+}
+
+// Stable sort (ties keep their original relative order) — recently-used
+// codes bubble to the top, in recency order; everything else stays in
+// whatever order the source list already had (alphabetical by name).
+function sortByRecentlyUsed(list) {
+  const recent = getRecentLanguages();
+  const rank = new Map(recent.map((code, i) => [code, i]));
+  return [...list].sort((a, b) => {
+    const ra = rank.has(a.code) ? rank.get(a.code) : Infinity;
+    const rb = rank.has(b.code) ? rank.get(b.code) : Infinity;
+    return ra - rb;
+  });
+}
+
 function renderLanguageOptions(list) {
-  languages = list;
+  languages = sortByRecentlyUsed(list);
   languageNames = new Map(list.map((l) => [l.code, l.name]));
   languageNames.set('auto', 'Detect language');
 
-  const targetOptions = list.map((l) => `<option value="${l.code}">${l.name}</option>`).join('');
+  const targetOptions = languages.map((l) => `<option value="${l.code}">${l.name}</option>`).join('');
   el.sourceLang.innerHTML = `<option value="auto">Detect language</option>` + targetOptions;
   el.targetLang.innerHTML = targetOptions;
 }
@@ -125,8 +156,8 @@ function applyLanguageDefaults() {
 }
 
 // Re-rendering the option list later (background upgrade from the live
-// server list, or after changing the server in Settings) shouldn't yank
-// the language the user is already looking at out from under them.
+// server list) shouldn't yank the language the user is already looking
+// at out from under them.
 function refreshLanguageOptions(list) {
   const prevSource = el.sourceLang.value;
   const prevTarget = el.targetLang.value;
@@ -141,15 +172,21 @@ function persistLanguageChoice() {
   localStorage.setItem(LAST_TARGET_KEY, el.targetLang.value);
 }
 
-function onLangChange() {
+// Split so changing the target doesn't also bump "English" to recent (it's
+// the source almost all the time) — that would crowd out the far more
+// useful "recently used target" signal with a language that's barely a
+// meaningful signal at all.
+function onLangChange(changedCode) {
   persistLanguageChoice();
-  updateOfflineButton();
+  recordRecentLanguages(changedCode);
+  refreshLanguageOptions(languages); // re-sort with the freshly-updated recency ranks
+  refreshOfflineUI();
   clearTimeout(debounceTimer);
   runTranslate();
 }
 
-el.sourceLang.addEventListener('change', onLangChange);
-el.targetLang.addEventListener('change', onLangChange);
+el.sourceLang.addEventListener('change', () => onLangChange(el.sourceLang.value));
+el.targetLang.addEventListener('change', () => onLangChange(el.targetLang.value));
 
 el.swapBtn.addEventListener('click', () => {
   if (el.sourceLang.value === 'auto') {
@@ -171,7 +208,9 @@ el.swapBtn.addEventListener('click', () => {
   }
   toggleClearButton();
   persistLanguageChoice();
-  updateOfflineButton();
+  recordRecentLanguages(t, s);
+  refreshLanguageOptions(languages);
+  refreshOfflineUI();
 });
 
 // ---------- Offline (on-device) model download ----------
@@ -208,6 +247,32 @@ function updateOfflineButton() {
   }
 }
 
+// Marks each dropdown option with a ✓ when downloading it (paired with
+// whatever's currently selected in the *other* dropdown) would complete an
+// already-downloaded offline pair. Rewrites option text in place rather
+// than rebuilding the <select>, so it doesn't disturb scroll position or
+// an open picker.
+function updateDownloadTicks() {
+  const source = el.sourceLang.value;
+  const target = el.targetLang.value;
+
+  Array.from(el.targetLang.options).forEach((opt) => {
+    const downloaded = source !== 'auto' && offline.isPairDownloaded(source, opt.value);
+    opt.textContent = (downloaded ? '✓ ' : '') + langLabel(opt.value);
+  });
+
+  Array.from(el.sourceLang.options).forEach((opt) => {
+    if (opt.value === 'auto') return;
+    const downloaded = Boolean(target) && offline.isPairDownloaded(opt.value, target);
+    opt.textContent = (downloaded ? '✓ ' : '') + langLabel(opt.value);
+  });
+}
+
+function refreshOfflineUI() {
+  updateOfflineButton();
+  updateDownloadTicks();
+}
+
 el.offlineBtn.addEventListener('click', async () => {
   const source = el.sourceLang.value;
   const target = el.targetLang.value;
@@ -217,7 +282,7 @@ el.offlineBtn.addEventListener('click', async () => {
   if (offline.isPairDownloaded(source, target)) {
     if (!window.confirm(`Remove the offline ${srcLabel} → ${tgtLabel} model? Translation will use the online server again.`)) return;
     offline.forgetPair(source, target);
-    updateOfflineButton();
+    refreshOfflineUI();
     return;
   }
 
@@ -231,7 +296,7 @@ el.offlineBtn.addEventListener('click', async () => {
       setOfflineButtonState('downloading', `Downloading ${tgtLabel}… ${pct}%`);
     });
     offlineDownloadInFlight = false;
-    updateOfflineButton();
+    refreshOfflineUI();
     showToast(`${tgtLabel} is ready to use offline`);
     scheduleTranslate(); // if there's text sitting there, retranslate using the model that just finished
   } catch (err) {
@@ -572,7 +637,14 @@ function restoreEntry(entry) {
   if (languageNames.has(entry.sourceLang)) el.sourceLang.value = entry.sourceLang;
   if (languageNames.has(entry.targetLang)) el.targetLang.value = entry.targetLang;
   persistLanguageChoice();
-  updateOfflineButton();
+  // Record target unconditionally, but only record source when it's
+  // something other than English — otherwise restoring history (which is
+  // almost always en->something) would repeatedly crowd English into the
+  // recent-target ranking the same way routine language switching would.
+  recordRecentLanguages(entry.targetLang);
+  if (entry.sourceLang !== 'en') recordRecentLanguages(entry.sourceLang);
+  refreshLanguageOptions(languages);
+  refreshOfflineUI();
 
   el.sourceText.value = entry.sourceText;
   toggleClearButton();
@@ -612,50 +684,10 @@ el.searchInput.addEventListener('input', () => {
   searchDebounce = setTimeout(renderHistory, 120);
 });
 
-// ---------- Settings ----------
-
-function openSettings() {
-  el.endpointInput.value = api.getEndpoint();
-  el.settingsSheet.hidden = false;
-}
-
-function closeSettings() {
-  el.settingsSheet.hidden = true;
-}
-
-el.settingsBtn.addEventListener('click', openSettings);
-el.closeSettingsBtn.addEventListener('click', closeSettings);
-el.settingsSheet.addEventListener('click', (e) => {
-  if (e.target === el.settingsSheet) closeSettings();
-});
-
-el.saveEndpointBtn.addEventListener('click', async () => {
-  const value = el.endpointInput.value.trim();
-  try {
-    // eslint-disable-next-line no-new
-    new URL(value);
-  } catch (_) {
-    showToast('Enter a valid URL');
-    return;
-  }
-  api.setEndpoint(value);
-  closeSettings();
-  showToast('Server updated');
-  api.fetchLanguages().then(refreshLanguageOptions).catch(() => {});
-});
-
-el.resetEndpointBtn.addEventListener('click', async () => {
-  api.resetEndpoint();
-  el.endpointInput.value = api.DEFAULT_ENDPOINT;
-  showToast('Reset to default server');
-  api.fetchLanguages().then(refreshLanguageOptions).catch(() => {});
-});
-
 // ---------- Init ----------
 
 function initVersionTag() {
-  el.versionTag = $('versionTag');
-  if (el.versionTag) el.versionTag.textContent = `Translate History v${APP_VERSION}`;
+  if (el.versionTag) el.versionTag.textContent = `v${APP_VERSION}`;
 }
 
 // Keeps the installed app in step with whatever is on GitHub: any time a
@@ -708,8 +740,8 @@ async function init() {
   // disturbing whatever the user has already selected.
   renderLanguageOptions(api.FALLBACK_LANGUAGES);
   applyLanguageDefaults();
-  updateOfflineButton();
-  api.fetchLanguages().then(refreshLanguageOptions).then(updateOfflineButton).catch(() => {});
+  refreshOfflineUI();
+  api.fetchLanguages().then(refreshLanguageOptions).then(refreshOfflineUI).catch(() => {});
 
   allEntries = await db.getAllEntries();
   renderHistory();

@@ -84,23 +84,36 @@
   — the app only ever picks automatically between the providers above. If
   self-hosting support is ever needed again, that's a feature to
   reintroduce deliberately, not a removed-by-accident gap.
-- `js/dictionary.js` is the true last resort, below even the servers
-  above: a tiny bundled word/phrase list (`DICTIONARIES`, keyed by
-  `"src:tgt"`) used only when `api.translateText()` throws (every server
-  exhausted) AND there's no downloaded neural pack for the pair —
-  `runTranslate()` in `js/main.js` only reaches it from the `catch` around
-  the online call. Pure word-for-word substitution, no grammar or word
-  order, so a translated result always shows `#dictNote` ("approximate,
-  not a full translation") — never silently pass this off as equivalent
-  to a real translation. Entries are stored in the target's native script
-  (Cyrillic for Bulgarian); romanization is applied afterward by the same
-  `transliterateBulgarian()` call every other Bulgarian result goes
-  through, so `dictionary.js` doesn't need to know about romanization at
-  all. Only `en:bg` exists today — the one pair this project has actually
-  needed it for, since Bulgarian has no small dedicated offline model (see
-  below) and the crash-prone multilingual fallback that used to cover it
-  was removed. Adding another pair means adding another `"src:tgt"` entry
-  to `DICTIONARIES`, nothing else.
+- Before falling all the way to the bundled dictionary, `runTranslate()`'s
+  `catch` around the online call first tries `findHistoryMatch()` — an
+  exact (trimmed, case-insensitive) lookup against this device's own
+  saved history for the same source/target pair. This is what makes any
+  language pair usable offline, not just ones with a bundled dictionary or
+  downloaded neural model: once you've translated a phrase online once
+  (through whichever provider — Google, LibreTranslate, MyMemory — was
+  live at the time), retyping that exact phrase later with no network at
+  all replays the real saved result, full quality, no `#dictNote`
+  disclaimer. It's exact-match only, deliberately — no fuzzy/partial
+  matching, since a near-miss could replay the wrong sentence's
+  translation with no way for the user to tell. Only text that's never
+  been translated before falls through further to the dictionary below.
+- `js/dictionary.js` is the true last resort, below even the servers and
+  the history-reuse lookup above: a bundled word/phrase list
+  (`DICTIONARIES`, keyed by `"src:tgt"`) used only when `api.translateText()`
+  throws (every server exhausted), there's no downloaded neural pack for
+  the pair, AND `findHistoryMatch()` comes up empty. Pure word-for-word
+  substitution, no grammar or word order, so a translated result always
+  shows `#dictNote` ("approximate, not a full translation") — never
+  silently pass this off as equivalent to a real translation. Entries are
+  stored in the target's native script (Cyrillic for Bulgarian);
+  romanization is applied afterward by the same `transliterateBulgarian()`
+  call every other Bulgarian result goes through, so `dictionary.js`
+  doesn't need to know about romanization at all. Only `en:bg` exists
+  today (~500 entries) — the one pair this project has actually needed it
+  for, since Bulgarian has no small dedicated offline model (see below)
+  and the crash-prone multilingual fallback that used to cover it was
+  removed. Adding another pair means adding another `"src:tgt"` entry to
+  `DICTIONARIES`, nothing else.
 
 ## Offline (on-device) translation
 

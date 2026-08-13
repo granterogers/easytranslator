@@ -64,14 +64,23 @@ at all — an earlier version fell back to a single much-larger multilingual
 model, but that fallback was removed after it was confirmed to crash
 mobile Safari mid-download.
 
-## Offline word dictionary (last resort)
+## Offline fallbacks (last resort)
 
-If every server is unreachable *and* there's no neural model for the
-current pair, the app falls back to a small bundled word-for-word
-dictionary rather than failing outright — enough to get the gist of a
-few words across with zero network and zero download. It's word-by-word
-only (no grammar or word order), so results are labeled "approximate,
-not a full translation" rather than presented as a real translation.
+If every server is unreachable and there's no neural model for the
+current pair, the app doesn't just fail:
+
+1. **Your own history first.** If you've translated this exact phrase
+   before while online — through any of the providers above — retyping
+   it later with no connection at all instantly replays that real,
+   full-quality result. This works for *any* language pair, not just
+   ones with a bundled dictionary, and it's built entirely from your own
+   past usage, growing automatically the more you use the app.
+2. **Bundled word dictionary**, only if the phrase has never been
+   translated before. A small built-in word-for-word list (~500 entries
+   for English → Bulgarian today) — enough to get the gist of a few
+   words across with zero network and zero download. It's word-by-word
+   only (no grammar or word order), so results are labeled "approximate,
+   not a full translation" rather than presented as a real translation.
 Today this only covers English → Bulgarian, the one pair that needs it.
 
 ## Project layout

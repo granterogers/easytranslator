@@ -352,6 +352,23 @@ function scheduleTranslate() {
   debounceTimer = setTimeout(runTranslate, atWordBoundary ? WORD_BOUNDARY_DEBOUNCE_MS : MID_WORD_DEBOUNCE_MS);
 }
 
+// Reuses a prior real translation from this device's own history when
+// nothing else can reach the network — works for ANY language pair (not
+// just ones with a bundled dictionary or downloaded neural model), since
+// it's built from whatever you've actually translated online before,
+// through whichever provider (Google, LibreTranslate, MyMemory) answered
+// at the time. Exact match only (trimmed, case-insensitive) — this is a
+// replay of a real translation, not a rephrasing, so partial/fuzzy
+// matches would risk returning something for the wrong sentence. Searches
+// newest-first so a since-corrected re-translation of the same text wins
+// over an older one.
+function findHistoryMatch(source, target, text) {
+  const norm = text.trim().toLowerCase();
+  return allEntries.find((e) =>
+    e.sourceLang === source && e.targetLang === target && e.sourceText.trim().toLowerCase() === norm
+  ) || null;
+}
+
 async function runTranslate() {
   const text = el.sourceText.value.trim();
   const source = el.sourceLang.value;
@@ -394,13 +411,18 @@ async function runTranslate() {
       try {
         ({ translatedText, detectedLanguage } = await api.translateText({ text, source, target }));
       } catch (apiErr) {
-        // Last resort when there's no network model AND no server reachable
-        // (offline with no downloaded pack, or every server down): fall
-        // back to a small bundled word-for-word dictionary rather than a
-        // hard failure. Word-for-word only — no grammar or word order — so
-        // it's clearly labeled as approximate, never silently swapped in
-        // for a real translation.
-        if (source !== 'auto' && hasDictionary(source, target)) {
+        // Every server is unreachable. First choice: have we translated
+        // this exact text for this exact pair before? If so, replay that
+        // real result — no quality loss, works for any language pair, and
+        // only gets more useful the more the app is used. Only if that
+        // misses do we fall back further to the small bundled word-for-word
+        // dictionary, which IS a quality loss (no grammar or word order),
+        // so that path stays clearly labeled as approximate.
+        const historyMatch = source !== 'auto' ? findHistoryMatch(source, target, text) : null;
+        if (historyMatch) {
+          translatedText = historyMatch.translatedText;
+          detectedLanguage = historyMatch.detectedLanguage || null;
+        } else if (source !== 'auto' && hasDictionary(source, target)) {
           const result = translateWithDictionary(text, source, target);
           translatedText = result.text;
           detectedLanguage = null;

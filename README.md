@@ -10,6 +10,8 @@ translation saved automatically to a searchable local history.
 - Two translation paths: a public [LibreTranslate](https://libretranslate.com/)
   server (**no API key required**) by default, or an on-device model you
   download once per language pair for instant, fully offline translation.
+  If neither is available for a pair, a small bundled word-for-word
+  dictionary kicks in as a last resort (see below).
 - Bulgarian output is shown romanized (Latin script), not Cyrillic.
 - Both language dropdowns always show your most recently used languages
   first, and mark any language that already has a downloaded offline
@@ -55,10 +57,20 @@ remaining indicator.
 
 Language pairs without a downloaded model keep using the server path
 above automatically. A pair with no dedicated model published anywhere
-(Bulgarian, at least, as of writing) isn't offered offline at all — an
-earlier version fell back to a single much-larger multilingual model, but
-that fallback was removed after it was confirmed to crash mobile Safari
-mid-download; that language keeps working over the server instead.
+(Bulgarian, at least, as of writing) isn't offered a full neural download
+at all — an earlier version fell back to a single much-larger multilingual
+model, but that fallback was removed after it was confirmed to crash
+mobile Safari mid-download.
+
+## Offline word dictionary (last resort)
+
+If every server is unreachable *and* there's no neural model for the
+current pair, the app falls back to a small bundled word-for-word
+dictionary rather than failing outright — enough to get the gist of a
+few words across with zero network and zero download. It's word-by-word
+only (no grammar or word order), so results are labeled "approximate,
+not a full translation" rather than presented as a real translation.
+Today this only covers English → Bulgarian, the one pair that needs it.
 
 ## Project layout
 
@@ -71,6 +83,8 @@ mid-download; that language keeps working over the server instead.
 - `js/translate-worker.js` — runs the on-device model in a Worker so
   downloading/inference never blocks the UI
 - `js/transliterate.js` — Cyrillic→Latin romanization for Bulgarian
+- `js/dictionary.js` — bundled word-for-word dictionary, last-resort
+  fallback when both the servers and any neural model are unavailable
 - `js/main.js` — UI wiring: tabs, translate flow, history,
   offline-download button, recent-language ordering
 - `sw.js` — service worker caching the app shell for offline use

@@ -70,6 +70,23 @@
   — the app only ever picks automatically between the mirrors above and
   MyMemory. If self-hosting support is ever needed again, that's a
   feature to reintroduce deliberately, not a removed-by-accident gap.
+- `js/dictionary.js` is the true last resort, below even the servers
+  above: a tiny bundled word/phrase list (`DICTIONARIES`, keyed by
+  `"src:tgt"`) used only when `api.translateText()` throws (every server
+  exhausted) AND there's no downloaded neural pack for the pair —
+  `runTranslate()` in `js/main.js` only reaches it from the `catch` around
+  the online call. Pure word-for-word substitution, no grammar or word
+  order, so a translated result always shows `#dictNote` ("approximate,
+  not a full translation") — never silently pass this off as equivalent
+  to a real translation. Entries are stored in the target's native script
+  (Cyrillic for Bulgarian); romanization is applied afterward by the same
+  `transliterateBulgarian()` call every other Bulgarian result goes
+  through, so `dictionary.js` doesn't need to know about romanization at
+  all. Only `en:bg` exists today — the one pair this project has actually
+  needed it for, since Bulgarian has no small dedicated offline model (see
+  below) and the crash-prone multilingual fallback that used to cover it
+  was removed. Adding another pair means adding another `"src:tgt"` entry
+  to `DICTIONARIES`, nothing else.
 
 ## Offline (on-device) translation
 

@@ -2,6 +2,7 @@ import * as db from './db.js';
 import * as api from './api.js';
 import * as offline from './offline-models.js';
 import { transliterateBulgarian } from './transliterate.js';
+import { hasDictionary, translateWithDictionary } from './dictionary.js';
 import { APP_VERSION } from './version.js';
 
 // Translating fires on word boundaries (space/newline/punctuation) almost
@@ -29,6 +30,7 @@ const el = {
   errorBanner: $('errorBanner'),
   resultBlock: $('resultBlock'),
   resultText: $('resultText'),
+  dictNote: $('dictNote'),
   viewTranslate: $('view-translate'),
   viewHistory: $('view-history'),
   historyList: $('historyList'),
@@ -203,6 +205,7 @@ el.swapBtn.addEventListener('click', () => {
     el.sourceText.value = resVal;
     el.resultText.textContent = srcVal;
     fitResultFontSize(srcVal);
+    el.dictNote.hidden = true;
   }
   toggleClearButton();
   persistLanguageChoice();
@@ -360,6 +363,7 @@ async function runTranslate() {
     hideError();
     el.resultBlock.hidden = true;
     el.detectedLabel.hidden = true;
+    el.dictNote.hidden = true;
     return;
   }
 
@@ -371,6 +375,7 @@ async function runTranslate() {
     const useOffline = source !== 'auto' && offline.isPairDownloaded(source, target);
     let translatedText;
     let detectedLanguage;
+    let usedDictionary = false;
     if (useOffline) {
       try {
         translatedText = await offline.translateOffline(source, target, text);
@@ -386,7 +391,24 @@ async function runTranslate() {
         throw new Error(`The offline pack for ${langLabel(target)} is no longer available — tap "Download for offline" to get it again.`);
       }
     } else {
-      ({ translatedText, detectedLanguage } = await api.translateText({ text, source, target }));
+      try {
+        ({ translatedText, detectedLanguage } = await api.translateText({ text, source, target }));
+      } catch (apiErr) {
+        // Last resort when there's no network model AND no server reachable
+        // (offline with no downloaded pack, or every server down): fall
+        // back to a small bundled word-for-word dictionary rather than a
+        // hard failure. Word-for-word only — no grammar or word order — so
+        // it's clearly labeled as approximate, never silently swapped in
+        // for a real translation.
+        if (source !== 'auto' && hasDictionary(source, target)) {
+          const result = translateWithDictionary(text, source, target);
+          translatedText = result.text;
+          detectedLanguage = null;
+          usedDictionary = true;
+        } else {
+          throw apiErr;
+        }
+      }
     }
     if (token !== translateToken) return; // superseded by newer input/language change
 
@@ -397,6 +419,7 @@ async function runTranslate() {
     el.resultText.textContent = translatedText;
     fitResultFontSize(translatedText);
     el.resultBlock.hidden = false;
+    el.dictNote.hidden = !usedDictionary;
 
     if (source === 'auto' && detectedLanguage) {
       const name = languageNames.get(detectedLanguage) || detectedLanguage;
@@ -544,6 +567,7 @@ function restoreEntry(entry) {
   el.resultText.textContent = entry.translatedText;
   fitResultFontSize(entry.translatedText);
   el.resultBlock.hidden = false;
+  el.dictNote.hidden = true;
   hideError();
 
   if (entry.sourceLang === 'auto' && entry.detectedLanguage) {

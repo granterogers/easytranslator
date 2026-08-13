@@ -277,6 +277,14 @@ button, input, select, textarea {
   transition: font-size 0.1s ease;
 }
 
+.dict-note {
+  margin: 8px 4px 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.dict-note[hidden] { display: none; }
+
 /* ---------- History ---------- */
 
 .history-toolbar {

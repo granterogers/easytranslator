@@ -10,7 +10,7 @@
 //
 // Keep APP_VERSION in sync with js/version.js (this file can't import it —
 // it runs as a classic worker script, not a module) — bump both on deploy.
-const APP_VERSION = '1.4.4';
+const APP_VERSION = '1.5.0';
 const CACHE_PREFIX = 'translate-history-v';
 const CACHE_NAME = `${CACHE_PREFIX}${APP_VERSION}`;
 
@@ -25,6 +25,7 @@ const APP_SHELL = [
   './js/offline-models.js',
   './js/translate-worker.js',
   './js/transliterate.js',
+  './js/dictionary.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',

@@ -56,20 +56,34 @@
 - Steady state costs exactly one request (whichever mirror is cached in
   `lt_endpoint_resolved` is tried alone); a dead mirror triggers a fan-out
   race across the rest, and the new winner gets remembered.
-- Above the LibreTranslate-mirror layer, `translateText()` in `js/api.js`
-  has a second, independent provider: MyMemory
-  (`translateViaMyMemory()`), a long-running public translation API that
-  doesn't share small community LibreTranslate mirrors' reliability
-  problems. Whichever provider actually worked last is remembered
-  (`lt_provider_resolved`) and tried first next time, same pattern as the
-  mirror memory above. MyMemory doesn't support `source === 'auto'` —
-  that combination is skipped, not attempted-then-failed, specifically so
-  its "unsupported" rejection can never overwrite LibreTranslate's more
-  useful error message when both are exhausted.
+- `translateText()` in `js/api.js` has two more independent providers above
+  the LibreTranslate-mirror layer: Google, via `translateViaGoogleUnofficial()`
+  — the same undocumented no-key endpoint
+  (`translate.googleapis.com/translate_a/single`) most "free Google
+  Translate" libraries and browser extensions use, deliberately **not**
+  the official Cloud Translation API (that needs a billing-linked API key,
+  which would have to sit in this app's public JS with no backend to hide
+  it behind — anyone could lift it and run up charges on our bill). And
+  MyMemory (`translateViaMyMemory()`), a long-running public translation
+  API that doesn't share small community LibreTranslate mirrors'
+  reliability problems. Google is listed first as the default order for a
+  user who's never resolved a provider yet (generally the best quality of
+  the three), but whichever provider actually worked last is remembered
+  (`lt_provider_resolved`) and tried first next time regardless, same
+  memory pattern as the mirror-level one above — so the real steady-state
+  order is just whatever's proven reliable for that specific user. MyMemory
+  doesn't support `source === 'auto'` — that combination is skipped, not
+  attempted-then-failed, specifically so its "unsupported" rejection can
+  never overwrite a real provider's more useful error message when
+  everything is exhausted. The Google endpoint's response shape was
+  verified against public documentation of this well-known endpoint, not a
+  live call (this dev sandbox's egress is restricted to GitHub only) — if
+  it starts failing, check whether Google changed the response shape
+  before assuming it's just rate-limited.
 - There is no Settings screen, so no way to pin a custom server manually
-  — the app only ever picks automatically between the mirrors above and
-  MyMemory. If self-hosting support is ever needed again, that's a
-  feature to reintroduce deliberately, not a removed-by-accident gap.
+  — the app only ever picks automatically between the providers above. If
+  self-hosting support is ever needed again, that's a feature to
+  reintroduce deliberately, not a removed-by-accident gap.
 - `js/dictionary.js` is the true last resort, below even the servers
   above: a tiny bundled word/phrase list (`DICTIONARIES`, keyed by
   `"src:tgt"`) used only when `api.translateText()` throws (every server

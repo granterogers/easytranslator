@@ -36,13 +36,15 @@ To install on iPhone: open the site in Safari, tap the Share icon, then
 
 ## Translation server
 
-By default the app races a couple of public, key-free LibreTranslate
-mirrors and remembers whichever answers; if both are down, it
-automatically falls back to [MyMemory](https://mymemory.translated.net/),
-a separate, independent public translation API with no key required.
-Whichever one actually works is remembered so it's tried first next time.
-There's no Settings screen to point this at a different server — it's
-fully automatic.
+The app tries three independent, key-free providers and remembers
+whichever one works: Google Translate's free, undocumented public
+endpoint (the one browser extensions and "free Google Translate"
+libraries use — not the official paid Cloud API, which would need a
+billing-linked key this app has nowhere safe to hide); then a couple of
+public LibreTranslate mirrors; then [MyMemory](https://mymemory.translated.net/),
+a separate independent public translation API. Whichever one actually
+answers is remembered so it's tried first next time — there's no Settings
+screen to pin a specific one manually, it's fully automatic.
 
 ## Offline (on-device) translation
 

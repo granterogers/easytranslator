@@ -202,13 +202,52 @@ async function translateViaMyMemory(text, source, target) {
   }
 }
 
+// The undocumented endpoint Google's own web widgets (and most third-party
+// "free Google Translate" libraries/extensions) call under the hood — no
+// API key, no billing account, unlike the official Cloud Translation API.
+// Deliberately NOT the official API: this app has no backend, so an
+// official API key would have to live in the public JS bundle, where
+// anyone could lift it and run up charges on whoever's Google Cloud
+// billing account it's tied to. This endpoint has none of that risk since
+// there's no key at all, but the tradeoff is real: it's unsupported by
+// Google, undocumented, and could be rate-limited or blocked without
+// notice — the same category of risk as the LibreTranslate mirrors above,
+// just from a single provider instead of a pool of them. Response shape
+// verified against public documentation of this well-known endpoint, not
+// a live call (this dev sandbox's egress is restricted to GitHub only).
+async function translateViaGoogleUnofficial(text, source, target) {
+  const sl = source === 'auto' ? 'auto' : source;
+  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${target}&dt=t&q=${encodeURIComponent(text)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) throw new Error(`Google responded with ${res.status}`);
+    const data = await res.json();
+    // Shape: [[[translatedChunk, originalChunk, ...], ...], null, detectedSourceLang, ...]
+    const segments = Array.isArray(data) ? data[0] : null;
+    if (!Array.isArray(segments)) throw new Error('Unexpected Google response shape');
+    const translatedText = segments.map((seg) => (Array.isArray(seg) ? seg[0] : '') || '').join('');
+    if (!translatedText) throw new Error('Empty translation from Google');
+    const detectedLanguage = source === 'auto' && typeof data[2] === 'string' ? data[2] : null;
+    return { translatedText, detectedLanguage };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const PROVIDER_KEY = 'lt_provider_resolved';
 
-// Two independent providers, tried in whichever order worked last time (so
-// once one proves reliable for this user, we go straight to it instead of
-// re-trying a known-dead one on every call).
+// Three independent providers, tried in whichever order worked last time
+// (so once one proves reliable for this user, we go straight to it instead
+// of re-trying a known-dead one on every call). Google is listed first as
+// the default order for a never-yet-resolved user — generally the best
+// quality of the three — but that's only the starting point; the memory
+// above means the actual steady-state order is whatever's proven reliable
+// for this specific user for this specific browser.
 export async function translateText({ text, source, target }) {
   const providers = [
+    { id: 'google', supported: true, run: () => translateViaGoogleUnofficial(text, source, target) },
     { id: 'libretranslate', supported: true, run: () => translateViaLibreTranslate(text, source, target) },
     { id: 'mymemory', supported: source !== 'auto', run: () => translateViaMyMemory(text, source, target) },
   ];

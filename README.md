@@ -7,12 +7,6 @@ translation saved automatically to a searchable local history.
 - Translates live as you type (word by word), no button to press. Result
   text shrinks as the translation gets longer, so it stays visible above
   the keyboard.
-- Push-to-talk speech input — hold the mic button and speak, like a
-  walkie-talkie, using the browser's built-in speech recognition (no API
-  key). Not available once installed to the iOS home screen (Apple
-  restricts this specifically for standalone PWAs) — the app detects that
-  and points to the iOS keyboard's own dictation mic instead, which works
-  everywhere.
 - Two translation paths: a public [LibreTranslate](https://libretranslate.com/)
   server (**no API key required**) by default, or an on-device model you
   download once per language pair for instant, fully offline translation.
@@ -76,7 +70,7 @@ in download size, but the only way to get that language offline at all.
   downloading/inference never blocks the UI
 - `js/transliterate.js` — Cyrillic→Latin romanization for Bulgarian
 - `js/main.js` — UI wiring: tabs, translate flow, history,
-  offline-download button, push-to-talk mic, recent-language ordering
+  offline-download button, recent-language ordering
 - `sw.js` — service worker caching the app shell for offline use
 - `manifest.webmanifest` — PWA install metadata
 - `icons/` — app icons (source/regen instructions in `scripts/icon-source.html`)

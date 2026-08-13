@@ -32,7 +32,13 @@
   than a stale cached copy.
 - `sw.js`'s cache name is versioned (`translate-history-v${APP_VERSION}`),
   so bumping the version also invalidates the old offline-fallback cache on
-  `activate`.
+  `activate` — but `activate`'s cleanup filters on `CACHE_PREFIX` and only
+  ever deletes keys starting with it. It used to delete *any* key that
+  didn't match the current `CACHE_NAME`, which also destroyed the separate
+  Cache Storage entry `@xenova/transformers` uses to persist downloaded
+  offline models — wiping every downloaded language pack on every single
+  deploy, since this project bumps the version on every push. Don't widen
+  that filter back to "everything except CACHE_NAME."
 - `js/main.js` reloads the page once when a new service worker takes
   control (`controllerchange`), so a fresh deploy takes effect immediately
   instead of waiting for a manual refresh.
@@ -132,39 +138,6 @@
   don't assume the same character map applies to other Cyrillic-script
   languages (Russian, Ukrainian, Serbian have their own, different
   romanization conventions).
-
-## Push-to-talk speech-to-text
-
-- `js/main.js`'s mic button uses the browser's built-in `SpeechRecognition`
-  (no API key, no server). Press-and-hold, not toggle:
-  touchstart/mousedown calls `startRecording()`, touchend/mouseup/
-  mouseleave calls `stopRecording()`.
-- **Confirmed on a real device** (not just suspected): iOS Safari throws
-  `service-not-allowed` for `webkitSpeechRecognition` specifically inside
-  an installed ("Add to Home Screen") standalone PWA, even though the
-  identical code works in an ordinary Safari tab — corroborated by
-  multiple independent iOS developer reports of the exact same pattern.
-  This is Apple's standalone-PWA sandbox restricting microphone-based
-  Speech Recognition, not fixable from page code. `isStandaloneDisplay()`
-  detects this up front (`navigator.standalone` / `display-mode:
-  standalone`) and hides the mic button before ever calling `.start()`
-  there, replacing it with `#micHint` pointing at the one thing that
-  reliably works in every context: the iOS keyboard's own built-in
-  dictation mic, which isn't a web API and so isn't subject to this
-  restriction at all.
-- Also self-heals for whatever standalone-mode detection doesn't catch
-  (Siri/Dictation disabled in Settings, other iOS-version quirks reported
-  in the wild): a live `service-not-allowed` or `not-allowed` error from
-  `.start()` permanently hides the button in favor of the hint
-  (`disableMicPermanently()`) rather than leaving a control present that
-  demonstrably fails on every future press.
-- `micAvailable` (not just checking the button's own `hidden` state) is
-  what `activateTab()` consults when switching back to the Translate tab
-  — don't reintroduce a bug where switching tabs makes a
-  permanently-disabled mic button reappear.
-- Starting a new recording while a translation is already showing clears
-  the input/output first (`startRecording()`'s `resultBlock.hidden` check)
-  — a fresh press means "start over," not "append to the old one."
 
 ## UI layout
 

@@ -29,8 +29,6 @@ const el = {
   errorBanner: $('errorBanner'),
   resultBlock: $('resultBlock'),
   resultText: $('resultText'),
-  micBtn: $('micBtn'),
-  micHint: $('micHint'),
   viewTranslate: $('view-translate'),
   viewHistory: $('view-history'),
   historyList: $('historyList'),
@@ -64,10 +62,6 @@ function showToast(message) {
 
 // ---------- Tabs ----------
 
-// Set by setupSpeechRecognition() once at startup — whether the custom
-// push-to-talk button actually works in this browser/context at all.
-let micAvailable = true;
-
 function activateTab(target) {
   el.tabBtns.forEach((btn) => {
     const active = btn.dataset.target === target;
@@ -76,9 +70,6 @@ function activateTab(target) {
   });
   el.viewTranslate.hidden = target !== 'translate';
   el.viewHistory.hidden = target !== 'history';
-  const onTranslate = target === 'translate';
-  el.micBtn.hidden = !onTranslate || !micAvailable;
-  el.micHint.hidden = !onTranslate || micAvailable;
   el.views.scrollTop = 0;
 }
 
@@ -338,147 +329,6 @@ el.clearInputBtn.addEventListener('click', () => {
   el.sourceText.focus();
   scheduleTranslate();
 });
-
-// ---------- Push-to-talk speech-to-text ----------
-//
-// Uses the browser's built-in SpeechRecognition — no API key, no server of
-// ours involved. Hold the mic button to listen, release to stop, like a
-// walkie-talkie.
-//
-// CONFIRMED (not just suspected) via multiple independent iOS developer
-// reports: webkitSpeechRecognition works in an ordinary Safari tab but
-// fails with a "service-not-allowed" error once the same page is
-// installed via "Add to Home Screen" — Apple's standalone-PWA sandbox
-// restricts microphone-based Speech Recognition specifically in that
-// mode, and there is no fix available from page code; it's an OS-level
-// restriction, not a bug in this app. Detected via `isStandaloneDisplay()`
-// and the button is hidden before ever attempting `.start()` there, with
-// `#micHint` pointing at the one thing that reliably works in every
-// context instead: the iOS keyboard's own built-in dictation mic, which
-// isn't a web API at all and so isn't subject to this restriction.
-//
-// Also self-heals for whatever's left over (Siri/Dictation disabled in
-// Settings, other iOS-version-specific quirks reported in the wild): if
-// `.start()` ever actually fails with 'service-not-allowed' or
-// 'not-allowed', the button permanently hides itself in favor of the
-// hint rather than staying present and silently failing on every future
-// press.
-function isStandaloneDisplay() {
-  return window.navigator.standalone === true
-    || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
-}
-
-const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-const SPEECH_LOCALES = {
-  en: 'en-US', es: 'es-ES', fr: 'fr-FR', de: 'de-DE', it: 'it-IT', pt: 'pt-PT',
-  ru: 'ru-RU', bg: 'bg-BG', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', ar: 'ar-SA',
-  hi: 'hi-IN', nl: 'nl-NL', pl: 'pl-PL', tr: 'tr-TR', uk: 'uk-UA', vi: 'vi-VN',
-  th: 'th-TH', el: 'el-GR', he: 'he-IL', sv: 'sv-SE', da: 'da-DK', fi: 'fi-FI',
-  cs: 'cs-CZ', sk: 'sk-SK', ro: 'ro-RO', hu: 'hu-HU', id: 'id-ID', ms: 'ms-MY',
-  fa: 'fa-IR', ur: 'ur-PK', bn: 'bn-BD', ca: 'ca-ES', hr: 'hr-HR', nb: 'nb-NO',
-};
-
-function speechLocaleFor(code) {
-  return SPEECH_LOCALES[code] || (code === 'auto' ? 'en-US' : code);
-}
-
-let recognition = null;
-let recognizing = false;
-let speechBaseText = '';
-
-function disableMicPermanently() {
-  micAvailable = false;
-  el.micBtn.hidden = true;
-  el.micHint.hidden = el.viewTranslate.hidden;
-}
-
-function setupSpeechRecognition() {
-  if (!SpeechRecognitionCtor || isStandaloneDisplay()) {
-    disableMicPermanently();
-    return;
-  }
-
-  recognition = new SpeechRecognitionCtor();
-  recognition.continuous = true;
-  recognition.interimResults = true;
-
-  recognition.onresult = (event) => {
-    let finalTranscript = '';
-    let interim = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const transcript = event.results[i][0].transcript;
-      if (event.results[i].isFinal) finalTranscript += transcript;
-      else interim += transcript;
-    }
-    if (finalTranscript) {
-      speechBaseText = `${speechBaseText} ${finalTranscript}`.trim();
-      el.sourceText.value = speechBaseText;
-      toggleClearButton();
-      scheduleTranslate();
-    } else if (interim) {
-      el.sourceText.value = `${speechBaseText} ${interim}`.trim();
-    }
-  };
-
-  recognition.onerror = (event) => {
-    stopRecording();
-    if (event.error === 'service-not-allowed' || event.error === 'not-allowed') {
-      // Confirmed broken for this session (standalone-mode restriction we
-      // didn't otherwise detect, Dictation disabled in Settings, etc.) —
-      // stop offering a button that demonstrably doesn't work here.
-      disableMicPermanently();
-      showToast('Speech input isn’t available here — try the mic on your keyboard instead');
-    } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
-      showToast(`Speech recognition error: ${event.error}`);
-    }
-  };
-
-  recognition.onend = () => {
-    recognizing = false;
-    el.micBtn.classList.remove('recording');
-  };
-}
-
-function startRecording() {
-  if (!recognition || recognizing) return;
-
-  // Starting a fresh recording after a translation is already showing
-  // means "start over" — clear the old input/output first.
-  if (!el.resultBlock.hidden) {
-    el.sourceText.value = '';
-    el.resultBlock.hidden = true;
-    el.detectedLabel.hidden = true;
-    hideError();
-    toggleClearButton();
-  }
-
-  speechBaseText = el.sourceText.value;
-  recognition.lang = speechLocaleFor(el.sourceLang.value);
-
-  try {
-    recognition.start();
-    recognizing = true;
-    el.micBtn.classList.add('recording');
-  } catch (_) {
-    // start() throws if a recognition session is already active; safe to ignore
-  }
-}
-
-function stopRecording() {
-  if (!recognition || !recognizing) return;
-  recognition.stop();
-  recognizing = false;
-  el.micBtn.classList.remove('recording');
-  scheduleTranslate();
-}
-
-el.micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); }, { passive: false });
-el.micBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecording(); });
-el.micBtn.addEventListener('touchcancel', () => stopRecording());
-el.micBtn.addEventListener('mousedown', () => startRecording());
-el.micBtn.addEventListener('mouseup', () => stopRecording());
-el.micBtn.addEventListener('mouseleave', () => { if (recognizing) stopRecording(); });
 
 // ---------- Translate (live — fires automatically as you type) ----------
 
@@ -784,7 +634,6 @@ async function init() {
   renderHistory();
 
   toggleClearButton();
-  setupSpeechRecognition();
 
   registerServiceWorker();
 }

@@ -108,9 +108,62 @@
   against a mocked module (same sandbox network restriction as above), not
   against the real `onnx-community/opus-mt-en-bg` repo, so whether this
   specific fallback actually resolves `en-bg` still needs a real-device
-  check. If a pair is missing from both orgs, it genuinely has no
-  published ONNX conversion anywhere either of us can find, not something
-  more retrying fixes.
+  check. If both bilingual orgs come back missing, `getPipeline()` falls
+  through to `Xenova/nllb-200-distilled-600M` — Meta's 200-language model
+  — as a last resort, using FLORES-200 codes (`FLORES_CODES`) rather than
+  ISO ones, passed at call time rather than baked into the model id (one
+  shared download covers every pair NLLB supports, not just one). This is
+  a much bigger download than the bilingual models (a few hundred MB vs.
+  tens) — a real tradeoff, not hidden from the user, just the only
+  remaining lever for a pair with no dedicated model anywhere findable.
+  Same caveat as above: verified via mocks only, not the real repo.
+
+## Bulgarian is shown romanized
+
+- `js/transliterate.js`'s `transliterateBulgarian()` converts Bulgarian
+  output from Cyrillic to Latin using the official government "Streamlined
+  System" (what Bulgaria itself uses on road signs/passports) — a pure,
+  offline, deterministic character map, not a network call, so it's fully
+  tested and 100% reliable regardless of the translation source. Applied
+  once, right after either translation path (`js/main.js`'s
+  `runTranslate()`) returns, before both display and saving to history —
+  so history stores the romanized form too, not Cyrillic. Only Bulgarian;
+  don't assume the same character map applies to other Cyrillic-script
+  languages (Russian, Ukrainian, Serbian have their own, different
+  romanization conventions).
+
+## Push-to-talk speech-to-text
+
+- `js/main.js`'s mic button uses the browser's built-in `SpeechRecognition`
+  (no API key, no server). Press-and-hold, not toggle:
+  touchstart/mousedown calls `startRecording()`, touchend/mouseup/
+  mouseleave calls `stopRecording()`. Hidden entirely via feature
+  detection when the constructor doesn't exist.
+- **Untested on a real device, and there's a specific known risk worth
+  flagging proactively this time**: iOS Safari's `SpeechRecognition`
+  support has a documented history of being unreliable specifically
+  inside an installed ("Add to Home Screen") standalone PWA even when it
+  works fine in an ordinary Safari tab. If the mic button does nothing
+  once installed, testing it in a plain Safari tab first will tell you
+  whether that's this known limitation or something else.
+- Starting a new recording while a translation is already showing clears
+  the input/output first (`startRecording()`'s `resultBlock.hidden` check)
+  — a fresh press means "start over," not "append to the old one."
+
+## UI layout
+
+- No app header — removed along with the title, to save vertical space for
+  reading translations next to the keyboard. The settings button lives in
+  the tab bar instead (`#settingsBtn`, styled like a tab but excluded from
+  `tabBtns` — see the comment at that array — since it opens a sheet
+  rather than switching views).
+- The language row is collapsible (`#langToggleBtn` / `#langRow`) for the
+  same reason; state isn't persisted across launches, always starts
+  expanded.
+- `js/main.js`'s `fitResultFontSize()` shrinks the result text as it gets
+  longer (stepped, not a formula) so a full sentence stays visible above
+  the keyboard instead of scrolling off; called everywhere `resultText` is
+  set (translate, restore-from-history, swap).
 
 ## Startup performance
 

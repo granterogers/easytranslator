@@ -49,26 +49,6 @@ button, input, select, textarea {
   flex-direction: column;
 }
 
-/* ---------- Top bar ---------- */
-
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: calc(var(--safe-top) + 14px) 18px 14px;
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: linear-gradient(var(--bg) 70%, transparent);
-}
-
-.brand {
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  margin: 0;
-}
-
 .icon-btn {
   width: 44px;
   height: 44px;
@@ -97,7 +77,7 @@ button, input, select, textarea {
 
 .views {
   flex: 1;
-  padding: 4px 18px calc(var(--tabbar-height) + var(--safe-bottom) + 16px);
+  padding: calc(var(--safe-top) + 8px) 18px calc(var(--tabbar-height) + var(--safe-bottom) + 90px);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -106,12 +86,35 @@ button, input, select, textarea {
 
 /* ---------- Language row ---------- */
 
+.lang-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 28px;
+  margin-bottom: 2px;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.lang-toggle-btn .chevron {
+  width: 22px;
+  height: 22px;
+  fill: var(--text-faint);
+  transition: transform 0.2s ease;
+}
+
+.lang-toggle-btn[aria-expanded="false"] .chevron { transform: rotate(180deg); }
+
+.lang-row[hidden] { display: none; }
+
 .lang-row {
   display: grid;
   grid-template-columns: 1fr 48px 1fr;
   align-items: center;
   gap: 8px;
-  margin: 8px 0 16px;
+  margin: 0 0 16px;
 }
 
 .lang-select {
@@ -189,14 +192,14 @@ button, input, select, textarea {
 
 .source-text {
   width: 100%;
-  min-height: 140px;
+  min-height: 100px;
   resize: vertical;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--bg-input);
   color: var(--text);
-  padding: 16px;
-  font-size: 24px;
+  padding: 14px;
+  font-size: 18px;
   line-height: 1.35;
 }
 
@@ -295,45 +298,21 @@ button, input, select, textarea {
 
 /* ---------- Result ---------- */
 
-.result-block { margin-top: 18px; }
+.result-block { margin-top: 14px; }
 
 .result-text {
-  min-height: 100px;
+  min-height: 60px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--bg-elevated);
-  padding: 18px;
-  font-size: 32px;
+  padding: 14px 16px;
+  font-size: 22px; /* default — js/main.js overrides inline, shrinking as the translation gets longer */
   line-height: 1.3;
   font-weight: 600;
   white-space: pre-wrap;
   word-break: break-word;
+  transition: font-size 0.1s ease;
 }
-
-.result-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.action-btn {
-  flex: 1;
-  min-height: 52px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.action-btn svg { width: 20px; height: 20px; fill: var(--text); }
-
-.action-btn:active { background: var(--border); }
 
 /* ---------- History ---------- */
 
@@ -454,6 +433,44 @@ button, input, select, textarea {
   line-height: 1.5;
   margin-top: 60px;
 }
+
+/* ---------- Push-to-talk mic ---------- */
+
+.mic-btn {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--tabbar-height) + var(--safe-bottom) + 14px);
+  transform: translateX(-50%);
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  z-index: 8;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.mic-btn[hidden] { display: none; }
+
+.mic-btn svg {
+  width: 28px;
+  height: 28px;
+  fill: var(--accent-contrast);
+}
+
+.mic-btn.recording {
+  background: var(--danger);
+  box-shadow: 0 0 0 10px rgba(248, 113, 113, 0.25), 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+.mic-btn.recording svg { fill: #fff; }
 
 /* ---------- Tab bar ---------- */
 
@@ -620,17 +637,9 @@ button, input, select, textarea {
 
 .toast[hidden] { display: none; }
 
-/* ---------- Small screens ---------- */
-
-@media (max-width: 340px) {
-  .source-text { font-size: 24px; }
-  .result-text { font-size: 30px; }
-}
-
 /* ---------- Larger phones / small tablets ---------- */
 
 @media (min-width: 600px) {
   .views { max-width: 640px; margin: 0 auto; width: 100%; }
-  .topbar { max-width: 640px; margin: 0 auto; width: 100%; }
   .tabbar > * { max-width: 320px; }
 }

@@ -63,11 +63,59 @@ function modelIdsFor(src, tgt) {
   ];
 }
 
+// Last resort for a pair with no dedicated bilingual model anywhere findable
+// (confirmed: en-bg): NLLB-200, Meta's single model covering 200 languages
+// including ones the small per-pair opus-mt catalog never got around to.
+// Real tradeoff, not hidden from the UI: this is a much bigger download
+// than the ~40-90MB bilingual models — a few hundred MB — since it's one
+// general-purpose model instead of a small pair-specific one. It uses
+// FLORES-200 codes (e.g. "eng_Latn", "bul_Cyrl") rather than plain ISO
+// codes, passed at translate-call time rather than baked into the model
+// id, so unlike the bilingual models above, ALL pairs share the same
+// downloaded model — downloading it once for en→bg also covers, say,
+// en→ro for free.
+const NLLB_MODEL_ID = 'Xenova/nllb-200-distilled-600M';
+const FLORES_CODES = {
+  en: 'eng_Latn', bg: 'bul_Cyrl', es: 'spa_Latn', fr: 'fra_Latn', de: 'deu_Latn',
+  it: 'ita_Latn', pt: 'por_Latn', ru: 'rus_Cyrl', uk: 'ukr_Cyrl', pl: 'pol_Latn',
+  nl: 'nld_Latn', el: 'ell_Grek', tr: 'tur_Latn', ar: 'arb_Arab', he: 'heb_Hebr',
+  hi: 'hin_Deva', ja: 'jpn_Jpan', ko: 'kor_Hang', zh: 'zho_Hans', vi: 'vie_Latn',
+  th: 'tha_Thai', ro: 'ron_Latn', hu: 'hun_Latn', cs: 'ces_Latn', sk: 'slk_Latn',
+  sv: 'swe_Latn', da: 'dan_Latn', fi: 'fin_Latn', id: 'ind_Latn', fa: 'pes_Arab',
+  sq: 'als_Latn', ur: 'urd_Arab', bn: 'ben_Beng', sl: 'slv_Latn', hr: 'hrv_Latn',
+  et: 'est_Latn', lv: 'lvs_Latn', lt: 'lit_Latn', ka: 'kat_Geor', az: 'azj_Latn',
+  eu: 'eus_Latn', ca: 'cat_Latn', gl: 'glg_Latn', ga: 'gle_Latn', ms: 'zsm_Latn',
+  tl: 'tgl_Latn', nb: 'nob_Latn',
+};
+
 // pairKey -> Promise<translator fn>, so concurrent requests for the same
 // pair share one download/load instead of racing duplicate ones, and a
-// pair already loaded this session is reused instantly.
+// pair already loaded this session is reused instantly. NLLB is cached
+// under its own fixed key ('__nllb__') since it's one shared model serving
+// every pair, not a per-pair one.
 const pipelines = new Map();
 
+function getNllbTranslator(onProgress) {
+  const key = '__nllb__';
+  if (!pipelines.has(key)) {
+    pipelines.set(key, (async () => {
+      try {
+        const { pipeline, env } = await loadTransformers();
+        env.allowLocalModels = false;
+        return await pipeline('translation', NLLB_MODEL_ID, { progress_callback: onProgress });
+      } catch (err) {
+        pipelines.delete(key);
+        throw err;
+      }
+    })());
+  }
+  return pipelines.get(key);
+}
+
+// Always resolves to a plain `(text) => Promise<output>` callable — the
+// caller doesn't need to know whether it ended up backed by a small
+// bilingual model or the shared NLLB one; that difference (NLLB needs
+// src_lang/tgt_lang passed at call time) is wrapped away right here.
 function getPipeline(src, tgt, onProgress) {
   const key = `${src}:${tgt}`;
   if (!pipelines.has(key)) {
@@ -79,11 +127,24 @@ function getPipeline(src, tgt, onProgress) {
         let lastErr;
         for (const modelId of modelIdsFor(src, tgt)) {
           try {
-            return await pipeline('translation', modelId, { progress_callback: onProgress });
+            const fn = await pipeline('translation', modelId, { progress_callback: onProgress });
+            return (text) => fn(text);
           } catch (err) {
             lastErr = err;
           }
         }
+
+        const srcFlores = FLORES_CODES[src];
+        const tgtFlores = FLORES_CODES[tgt];
+        if (srcFlores && tgtFlores) {
+          try {
+            const fn = await getNllbTranslator(onProgress);
+            return (text) => fn(text, { src_lang: srcFlores, tgt_lang: tgtFlores });
+          } catch (err) {
+            lastErr = err;
+          }
+        }
+
         throw lastErr;
       } catch (err) {
         pipelines.delete(key); // don't cache a failed load — allow retry

@@ -1,6 +1,7 @@
 import * as db from './db.js';
 import * as api from './api.js';
 import * as offline from './offline-models.js';
+import { transliterateBulgarian } from './transliterate.js';
 import { APP_VERSION } from './version.js';
 
 // Translating fires on word boundaries (space/newline/punctuation) almost
@@ -14,6 +15,8 @@ const WORD_BOUNDARY_RE = /[\s.,!?;:\n]$/;
 const $ = (id) => document.getElementById(id);
 
 const el = {
+  langToggleBtn: $('langToggleBtn'),
+  langRow: $('langRow'),
   sourceLang: $('sourceLang'),
   targetLang: $('targetLang'),
   swapBtn: $('swapBtn'),
@@ -26,8 +29,7 @@ const el = {
   errorBanner: $('errorBanner'),
   resultBlock: $('resultBlock'),
   resultText: $('resultText'),
-  copyBtn: $('copyBtn'),
-  shareBtn: $('shareBtn'),
+  micBtn: $('micBtn'),
   viewTranslate: $('view-translate'),
   viewHistory: $('view-history'),
   historyList: $('historyList'),
@@ -36,7 +38,11 @@ const el = {
   searchInput: $('searchInput'),
   clearAllBtn: $('clearAllBtn'),
   historyCountBadge: $('historyCountBadge'),
-  tabBtns: Array.from(document.querySelectorAll('.tab-btn')),
+  // Excludes settingsBtn deliberately — it shares the .tab-btn look but
+  // isn't a view-switching tab (no data-target), it opens the settings
+  // sheet instead. Including it here would make activateTab(undefined)
+  // fire on click and hide both views.
+  tabBtns: Array.from(document.querySelectorAll('.tab-btn[data-target]')),
   settingsBtn: $('settingsBtn'),
   settingsSheet: $('settingsSheet'),
   endpointInput: $('endpointInput'),
@@ -72,6 +78,7 @@ function activateTab(target) {
   });
   el.viewTranslate.hidden = target !== 'translate';
   el.viewHistory.hidden = target !== 'history';
+  el.micBtn.hidden = target !== 'translate';
   el.views.scrollTop = 0;
 }
 
@@ -79,6 +86,15 @@ el.tabBtns.forEach((btn) => {
   btn.addEventListener('click', () => activateTab(btn.dataset.target));
 });
 el.views = document.querySelector('.views');
+
+// ---------- Collapsible language row ----------
+
+el.langToggleBtn.addEventListener('click', () => {
+  const expanded = el.langToggleBtn.getAttribute('aria-expanded') !== 'false';
+  el.langToggleBtn.setAttribute('aria-expanded', String(!expanded));
+  el.langToggleBtn.setAttribute('aria-label', expanded ? 'Show language selectors' : 'Hide language selectors');
+  el.langRow.hidden = expanded;
+});
 
 // ---------- Languages ----------
 
@@ -151,6 +167,7 @@ el.swapBtn.addEventListener('click', () => {
   if (hadResult) {
     el.sourceText.value = resVal;
     el.resultText.textContent = srcVal;
+    fitResultFontSize(srcVal);
   }
   toggleClearButton();
   persistLanguageChoice();
@@ -250,6 +267,117 @@ el.clearInputBtn.addEventListener('click', () => {
   scheduleTranslate();
 });
 
+// ---------- Push-to-talk speech-to-text ----------
+//
+// Uses the browser's built-in SpeechRecognition — no API key, no server of
+// ours involved. Hold the mic button to listen, release to stop, like a
+// walkie-talkie. KNOWN CAVEAT, undisclosed until tested for real: iOS
+// Safari's support for SpeechRecognition inside an installed ("Add to
+// Home Screen") standalone PWA has a history of being unreliable even
+// when it works fine in an ordinary Safari tab — if the mic button does
+// nothing when installed, try it in a plain Safari tab first to tell
+// those two cases apart.
+
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+const SPEECH_LOCALES = {
+  en: 'en-US', es: 'es-ES', fr: 'fr-FR', de: 'de-DE', it: 'it-IT', pt: 'pt-PT',
+  ru: 'ru-RU', bg: 'bg-BG', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', ar: 'ar-SA',
+  hi: 'hi-IN', nl: 'nl-NL', pl: 'pl-PL', tr: 'tr-TR', uk: 'uk-UA', vi: 'vi-VN',
+  th: 'th-TH', el: 'el-GR', he: 'he-IL', sv: 'sv-SE', da: 'da-DK', fi: 'fi-FI',
+  cs: 'cs-CZ', sk: 'sk-SK', ro: 'ro-RO', hu: 'hu-HU', id: 'id-ID', ms: 'ms-MY',
+  fa: 'fa-IR', ur: 'ur-PK', bn: 'bn-BD', ca: 'ca-ES', hr: 'hr-HR', nb: 'nb-NO',
+};
+
+function speechLocaleFor(code) {
+  return SPEECH_LOCALES[code] || (code === 'auto' ? 'en-US' : code);
+}
+
+let recognition = null;
+let recognizing = false;
+let speechBaseText = '';
+
+function setupSpeechRecognition() {
+  if (!SpeechRecognitionCtor) {
+    el.micBtn.hidden = true;
+    return;
+  }
+
+  recognition = new SpeechRecognitionCtor();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onresult = (event) => {
+    let finalTranscript = '';
+    let interim = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript;
+      if (event.results[i].isFinal) finalTranscript += transcript;
+      else interim += transcript;
+    }
+    if (finalTranscript) {
+      speechBaseText = `${speechBaseText} ${finalTranscript}`.trim();
+      el.sourceText.value = speechBaseText;
+      toggleClearButton();
+      scheduleTranslate();
+    } else if (interim) {
+      el.sourceText.value = `${speechBaseText} ${interim}`.trim();
+    }
+  };
+
+  recognition.onerror = (event) => {
+    stopRecording();
+    if (event.error !== 'no-speech' && event.error !== 'aborted') {
+      showToast(`Speech recognition error: ${event.error}`);
+    }
+  };
+
+  recognition.onend = () => {
+    recognizing = false;
+    el.micBtn.classList.remove('recording');
+  };
+}
+
+function startRecording() {
+  if (!recognition || recognizing) return;
+
+  // Starting a fresh recording after a translation is already showing
+  // means "start over" — clear the old input/output first.
+  if (!el.resultBlock.hidden) {
+    el.sourceText.value = '';
+    el.resultBlock.hidden = true;
+    el.detectedLabel.hidden = true;
+    hideError();
+    toggleClearButton();
+  }
+
+  speechBaseText = el.sourceText.value;
+  recognition.lang = speechLocaleFor(el.sourceLang.value);
+
+  try {
+    recognition.start();
+    recognizing = true;
+    el.micBtn.classList.add('recording');
+  } catch (_) {
+    // start() throws if a recognition session is already active; safe to ignore
+  }
+}
+
+function stopRecording() {
+  if (!recognition || !recognizing) return;
+  recognition.stop();
+  recognizing = false;
+  el.micBtn.classList.remove('recording');
+  scheduleTranslate();
+}
+
+el.micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); }, { passive: false });
+el.micBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecording(); });
+el.micBtn.addEventListener('touchcancel', () => stopRecording());
+el.micBtn.addEventListener('mousedown', () => startRecording());
+el.micBtn.addEventListener('mouseup', () => stopRecording());
+el.micBtn.addEventListener('mouseleave', () => { if (recognizing) stopRecording(); });
+
 // ---------- Translate (live — fires automatically as you type) ----------
 
 let debounceTimer = null;
@@ -299,12 +427,17 @@ async function runTranslate() {
 
   try {
     const useOffline = source !== 'auto' && offline.isPairDownloaded(source, target);
-    const { translatedText, detectedLanguage } = useOffline
+    let { translatedText, detectedLanguage } = useOffline
       ? { translatedText: await offline.translateOffline(source, target, text), detectedLanguage: null }
       : await api.translateText({ text, source, target });
     if (token !== translateToken) return; // superseded by newer input/language change
 
+    // Bulgarian is shown romanized, not in Cyrillic — readable without
+    // needing a Bulgarian keyboard/font familiarity.
+    if (target === 'bg') translatedText = transliterateBulgarian(translatedText);
+
     el.resultText.textContent = translatedText;
+    fitResultFontSize(translatedText);
     el.resultBlock.hidden = false;
 
     if (source === 'auto' && detectedLanguage) {
@@ -335,47 +468,20 @@ async function runTranslate() {
   }
 }
 
-// ---------- Copy / Share ----------
+// ---------- Adaptive result text size ----------
 
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch (_) {
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      return true;
-    } catch (__) {
-      return false;
-    }
-  }
+// Shrinks as the translation gets longer, so a full sentence still fits
+// on screen alongside the keyboard instead of scrolling out of view.
+function fitResultFontSize(text) {
+  const len = text.length;
+  let size = 22;
+  if (len > 30) size = 20;
+  if (len > 60) size = 18;
+  if (len > 100) size = 16;
+  if (len > 160) size = 14;
+  if (len > 240) size = 12;
+  el.resultText.style.fontSize = `${size}px`;
 }
-
-el.copyBtn.addEventListener('click', async () => {
-  const ok = await copyText(el.resultText.textContent);
-  showToast(ok ? 'Copied to clipboard' : 'Could not copy');
-});
-
-el.shareBtn.addEventListener('click', async () => {
-  const text = el.resultText.textContent;
-  if (navigator.share) {
-    try {
-      await navigator.share({ text });
-    } catch (err) {
-      if (err && err.name !== 'AbortError') showToast('Could not share');
-    }
-  } else {
-    const ok = await copyText(text);
-    showToast(ok ? 'Sharing not supported — copied instead' : 'Could not share');
-  }
-});
 
 // ---------- History ----------
 
@@ -471,6 +577,7 @@ function restoreEntry(entry) {
   el.sourceText.value = entry.sourceText;
   toggleClearButton();
   el.resultText.textContent = entry.translatedText;
+  fitResultFontSize(entry.translatedText);
   el.resultBlock.hidden = false;
   hideError();
 
@@ -608,6 +715,7 @@ async function init() {
   renderHistory();
 
   toggleClearButton();
+  setupSpeechRecognition();
 
   registerServiceWorker();
 }

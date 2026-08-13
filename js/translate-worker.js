@@ -8,20 +8,48 @@
 // that — including after the tab is closed and reopened, and while fully
 // offline — is served from disk with no network request at all.
 //
-// CAVEAT: the CDN URL and model naming scheme below are correct as of this
-// code being written, but this project has already been burned once by a
-// hardcoded list of third-party URLs going stale (see js/api.js history) —
-// and unlike that one, this file could not be verified against the real
-// network before shipping (this dev sandbox cannot reach huggingface.co or
-// jsdelivr.net at all). If downloads fail here, check the browser console
-// for the actual error before assuming the app is broken — it may just mean
-// this URL or model-naming scheme has moved on.
-const TRANSFORMERS_CDN_URL = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js';
+// CAVEAT: the CDN URLs and model naming scheme below are correct as of
+// this code being written, but this project has already been burned once
+// by a hardcoded list of third-party URLs going stale (see js/api.js
+// history) — and unlike that one, this file could not be verified against
+// the real network before shipping (this dev sandbox's egress is
+// restricted to GitHub only; huggingface.co and jsdelivr.net are both
+// unreachable from it). Errors are surfaced to the UI with their real
+// message rather than a generic failure, specifically so a bad URL here
+// is diagnosable from the app itself without needing devtools.
+//
+// `+esm` (not a raw /dist/ path) asks jsdelivr to guarantee a real ES
+// module regardless of the package's own build format — importing a
+// UMD/IIFE bundle directly would fail with a confusing syntax error that
+// has nothing to do with network reachability. esm.sh is a second,
+// independent CDN tried if jsdelivr's fails.
+const TRANSFORMERS_CDN_URLS = [
+  'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/+esm',
+  'https://esm.sh/@xenova/transformers@2.17.2',
+];
 
 let transformersPromise = null;
-function loadTransformers() {
-  if (!transformersPromise) transformersPromise = import(TRANSFORMERS_CDN_URL);
-  return transformersPromise;
+async function loadTransformers() {
+  if (transformersPromise) return transformersPromise;
+
+  transformersPromise = (async () => {
+    let lastErr;
+    for (const url of TRANSFORMERS_CDN_URLS) {
+      try {
+        return await import(url);
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw new Error(`Could not load the translation library from any CDN: ${lastErr && lastErr.message}`);
+  })();
+
+  try {
+    return await transformersPromise;
+  } catch (err) {
+    transformersPromise = null; // don't wedge future retries on a stale rejected promise
+    throw err;
+  }
 }
 
 function modelIdFor(src, tgt) {
@@ -37,9 +65,9 @@ function getPipeline(src, tgt, onProgress) {
   const key = `${src}:${tgt}`;
   if (!pipelines.has(key)) {
     pipelines.set(key, (async () => {
-      const { pipeline, env } = await loadTransformers();
-      env.allowLocalModels = false;
       try {
+        const { pipeline, env } = await loadTransformers();
+        env.allowLocalModels = false;
         return await pipeline('translation', modelIdFor(src, tgt), {
           progress_callback: onProgress,
         });

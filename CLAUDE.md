@@ -54,23 +54,42 @@
 
 ## Offline (on-device) translation
 
-- `js/translate-worker.js` runs `@xenova/transformers` (loaded from the
-  jsdelivr CDN, no bundler needed) in a Worker, using
-  `Xenova/opus-mt-{src}-{tgt}` ONNX models. `js/offline-models.js` is the
-  main-thread Promise-wrapper plus a `localStorage` record
-  (`lt_offline_pairs`) of which pairs the user explicitly opted to
-  download — never trigger a download without that opt-in, it costs tens
-  of MB of the user's data.
-- **This CDN + model-naming scheme could not be verified from the sandbox
-  this was built in** (huggingface.co and jsdelivr.net were both
-  unreachable from that environment — same class of problem as the
-  LibreTranslate mirror list above, just impossible to catch before
-  shipping this time). If offline downloads fail in the wild, check the
-  browser console for the actual error before assuming the plumbing is
-  broken — the CDN URL or model repo naming may have moved on, in which
-  case update `TRANSFORMERS_CDN_URL` / `modelIdFor()` in
-  `js/translate-worker.js`.
+- `js/translate-worker.js` runs `@xenova/transformers` in a Worker, tried
+  from two independent CDNs in turn (jsdelivr's `+esm` endpoint, then
+  esm.sh — `TRANSFORMERS_CDN_URLS`), using `Xenova/opus-mt-{src}-{tgt}`
+  ONNX models. `js/offline-models.js` is the main-thread Promise-wrapper
+  plus a `localStorage` record (`lt_offline_pairs`) of which pairs the
+  user explicitly opted to download — never trigger a download without
+  that opt-in, it costs tens of MB of the user's data.
+- **This CDN + model-naming scheme cannot be verified from the sandbox
+  this was built in** — its egress is restricted to GitHub only by
+  explicit organization policy (confirmed via `/root/.ccr/README.md`'s
+  "403/407: destination host is not allowed... do not retry or route
+  around it"), so huggingface.co and jsdelivr.net are permanently
+  unreachable there, not just flaky. This is a hard environment
+  constraint, not something more testing effort resolves — real
+  verification has to happen on an actual device. If offline downloads
+  fail: the error surfaced in the offline button's label **is the real
+  underlying error message**, not a generic one (see `getPipeline()`'s
+  error handling in `translate-worker.js`) — read that first rather than
+  guessing. A failed CDN load correctly clears the cached promise so a
+  retry actually re-attempts the network rather than replaying a stale
+  rejection (easy bug to reintroduce if this is refactored — the
+  try/catch has to wrap the CDN import itself, not just the `pipeline()`
+  call after it).
 - `js/main.js`'s `runTranslate()` uses the offline path automatically
   whenever `offline.isPairDownloaded(source, target)` is true; everything
   else (including `source === 'auto'`, which the offline button hides
   itself for) falls through to the server path unchanged.
+
+## Startup performance
+
+- The language dropdowns render synchronously from `api.FALLBACK_LANGUAGES`
+  on load (`renderLanguageOptions` + `applyLanguageDefaults` in
+  `js/main.js` `init()`) — they must **never** wait on
+  `api.fetchLanguages()` first. That network call races translation
+  mirrors with an 8s-per-attempt timeout; blocking initial render on it
+  was the actual cause of the app appearing to hang for ~16s on launch
+  whenever both mirrors were unreachable. The live list is fetched
+  afterward in the background and swapped in via `refreshLanguageOptions`,
+  which preserves whatever the user already has selected.

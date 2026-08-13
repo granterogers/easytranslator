@@ -24,7 +24,11 @@ export const DEFAULT_ENDPOINT = CANDIDATE_ENDPOINTS[0];
 
 const REQUEST_TIMEOUT_MS = 8000;
 
-const FALLBACK_LANGUAGES = [
+// Exported so the UI can render the language dropdowns instantly on
+// launch instead of waiting on a network round trip first (see
+// js/main.js init()) — this list is also the network-failure fallback
+// used internally by fetchLanguages() below.
+export const FALLBACK_LANGUAGES = [
   { code: 'en', name: 'English' },
   { code: 'sq', name: 'Albanian' },
   { code: 'ar', name: 'Arabic' },

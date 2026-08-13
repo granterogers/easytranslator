@@ -82,31 +82,41 @@ el.views = document.querySelector('.views');
 
 // ---------- Languages ----------
 
-function populateLanguageSelects() {
-  languageNames = new Map(languages.map((l) => [l.code, l.name]));
+function computeFallbackTarget() {
+  const lastTarget = localStorage.getItem(LAST_TARGET_KEY);
+  if (lastTarget && languageNames.has(lastTarget)) return lastTarget;
+  const browserLang = (navigator.language || 'en').slice(0, 2);
+  if (browserLang !== 'en' && languages.some((l) => l.code === browserLang)) return browserLang;
+  if (languages.some((l) => l.code === 'es')) return 'es';
+  return languages[0] ? languages[0].code : 'en';
+}
+
+function renderLanguageOptions(list) {
+  languages = list;
+  languageNames = new Map(list.map((l) => [l.code, l.name]));
   languageNames.set('auto', 'Detect language');
 
-  const targetOptions = languages
-    .map((l) => `<option value="${l.code}">${l.name}</option>`)
-    .join('');
-  const sourceOptions = `<option value="auto">Detect language</option>` + targetOptions;
-
-  el.sourceLang.innerHTML = sourceOptions;
+  const targetOptions = list.map((l) => `<option value="${l.code}">${l.name}</option>`).join('');
+  el.sourceLang.innerHTML = `<option value="auto">Detect language</option>` + targetOptions;
   el.targetLang.innerHTML = targetOptions;
+}
 
-  // Source always starts on English — no need to pick it every time.
+// First-ever render on launch: source always starts on English, target
+// restores the last-used one (or a sensible guess).
+function applyLanguageDefaults() {
   el.sourceLang.value = languageNames.has('en') ? 'en' : 'auto';
+  el.targetLang.value = computeFallbackTarget();
+}
 
-  const lastTarget = localStorage.getItem(LAST_TARGET_KEY);
-  const browserLang = (navigator.language || 'en').slice(0, 2);
-  const fallbackTarget = languages.some((l) => l.code === browserLang) && browserLang !== 'en'
-    ? browserLang
-    : (languages.some((l) => l.code === 'es') ? 'es' : (languages[0] ? languages[0].code : 'en'));
-
-  el.targetLang.value = (lastTarget && languageNames.has(lastTarget)) ? lastTarget : fallbackTarget;
-
-  if (!el.sourceLang.value) el.sourceLang.value = 'auto';
-  if (!el.targetLang.value) el.targetLang.value = fallbackTarget;
+// Re-rendering the option list later (background upgrade from the live
+// server list, or after changing the server in Settings) shouldn't yank
+// the language the user is already looking at out from under them.
+function refreshLanguageOptions(list) {
+  const prevSource = el.sourceLang.value;
+  const prevTarget = el.targetLang.value;
+  renderLanguageOptions(list);
+  el.sourceLang.value = languageNames.has(prevSource) ? prevSource : (languageNames.has('en') ? 'en' : 'auto');
+  el.targetLang.value = languageNames.has(prevTarget) ? prevTarget : computeFallbackTarget();
 }
 
 // Only the target language is remembered across launches — source always
@@ -209,7 +219,8 @@ el.offlineBtn.addEventListener('click', async () => {
     scheduleTranslate(); // if there's text sitting there, retranslate using the model that just finished
   } catch (err) {
     offlineDownloadInFlight = false;
-    setOfflineButtonState('error', `Couldn't download ${tgtLabel} — tap to retry`);
+    const reason = (err && err.message) ? String(err.message).slice(0, 120) : 'unknown error';
+    setOfflineButtonState('error', `Couldn't download ${tgtLabel}: ${reason} — tap to retry`);
     console.error('[offline]', err);
   }
 });
@@ -516,22 +527,17 @@ el.saveEndpointBtn.addEventListener('click', async () => {
   api.setEndpoint(value);
   closeSettings();
   showToast('Server updated');
-  await loadLanguages();
+  api.fetchLanguages().then(refreshLanguageOptions).catch(() => {});
 });
 
 el.resetEndpointBtn.addEventListener('click', async () => {
   api.resetEndpoint();
   el.endpointInput.value = api.DEFAULT_ENDPOINT;
   showToast('Reset to default server');
-  await loadLanguages();
+  api.fetchLanguages().then(refreshLanguageOptions).catch(() => {});
 });
 
 // ---------- Init ----------
-
-async function loadLanguages() {
-  languages = await api.fetchLanguages();
-  populateLanguageSelects();
-}
 
 function initVersionTag() {
   el.versionTag = $('versionTag');
@@ -582,8 +588,14 @@ async function init() {
     navigator.storage.persist().catch(() => {});
   }
 
-  await loadLanguages();
+  // Render instantly from the built-in language list — no network wait
+  // before the dropdowns (or anything else) are usable. The live/richer
+  // server list is fetched quietly afterward and swapped in without
+  // disturbing whatever the user has already selected.
+  renderLanguageOptions(api.FALLBACK_LANGUAGES);
+  applyLanguageDefaults();
   updateOfflineButton();
+  api.fetchLanguages().then(refreshLanguageOptions).then(updateOfflineButton).catch(() => {});
 
   allEntries = await db.getAllEntries();
   renderHistory();

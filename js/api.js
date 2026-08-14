@@ -278,6 +278,15 @@ async function translateViaGoogleUnofficial(text, source, target) {
 
 const PROVIDER_KEY = 'lt_provider_resolved';
 
+// Once a non-Google provider is remembered as reliable, the "steady state"
+// skip-ahead below means Google is never attempted again for the rest of
+// this page load — so a single early Google failure would otherwise hide
+// the real reason forever (no fresh `failures` entry to report) AND Google
+// would never get a chance to be noticed as recovered. Forcing one real
+// attempt per session bounds that cost to once per launch, not once per
+// keystroke, while keeping the fast path for every translation after it.
+let googleCheckedThisSession = false;
+
 // Three independent providers, tried in whichever order worked last time
 // (so once one proves reliable for this user, we go straight to it instead
 // of re-trying a known-dead one on every call). Google is listed first as
@@ -296,7 +305,10 @@ export async function translateText({ text, source, target }) {
     },
   ];
   const preferred = localStorage.getItem(PROVIDER_KEY);
-  if (preferred) providers.sort((a, b) => (a.id === preferred ? -1 : b.id === preferred ? 1 : 0));
+  if (preferred && googleCheckedThisSession) {
+    providers.sort((a, b) => (a.id === preferred ? -1 : b.id === preferred ? 1 : 0));
+  }
+  googleCheckedThisSession = true;
 
   // A provider that doesn't apply here (e.g. MyMemory + auto-detect) is
   // skipped silently — its "not supported" rejection must never overwrite

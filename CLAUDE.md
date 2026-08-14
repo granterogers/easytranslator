@@ -71,8 +71,18 @@
   the three), but whichever provider actually worked last is remembered
   (`lt_provider_resolved`) and tried first next time regardless, same
   memory pattern as the mirror-level one above — so the real steady-state
-  order is just whatever's proven reliable for that specific user. MyMemory
-  doesn't support `source === 'auto'` — that combination is skipped, not
+  order is just whatever's proven reliable for that specific user.
+  `googleCheckedThisSession` (module-level, resets on page load) forces one
+  real Google attempt per app launch even when a different provider is
+  remembered as preferred — without it, a single early Google failure
+  would permanently skip Google for the rest of that session (the
+  steady-state optimization means only the remembered provider gets
+  tried), which both stops Google from ever being noticed as recovered
+  and stops `failures` below from ever containing a fresh reason why it's
+  down. Bounded to once per launch, not once per keystroke, so it doesn't
+  reintroduce the per-call cost the memory optimization exists to avoid.
+  MyMemory doesn't support `source === 'auto'` — that combination is
+  skipped, not
   attempted-then-failed, specifically so its "unsupported" rejection can
   never overwrite a real provider's more useful error message when
   everything is exhausted. The Google endpoint's response shape was

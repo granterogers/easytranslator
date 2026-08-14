@@ -92,6 +92,20 @@
   quality bug. The note is saved with the history entry (`provider`,
   `usedDictionary` fields) so replaying that exact entry later (see
   `findHistoryMatch()` below) shows the same attribution, not a blank one.
+- `translateText()`'s returned `failures` array carries the `{ id, message }`
+  of every provider that failed before the one that finally answered — this
+  is what lets `describeTranslationSource()` append the *real* underlying
+  reason ("Google error: Failed to fetch" / "...is not valid JSON" / "Google
+  responded with 429") to the note instead of a vague "Google unavailable"
+  with no way to diagnose it. This matters a lot for the unofficial Google
+  endpoint specifically, since a persistent failure there is otherwise
+  undiagnosable without attaching devtools to the device — a JSON-parse
+  error in that message means Google served an HTML block/CAPTCHA page
+  instead of a translation (200 OK, so `res.ok` doesn't catch it); "Failed
+  to fetch" means the request never got a response at all (network-level —
+  CORS is the prime suspect, though unconfirmed without a live device
+  test). Saved on the history entry as `googleError` so a replayed result
+  keeps showing the same diagnostic instead of losing it.
 - `MYMEMORY_MAX_CHARS` (500) guards against MyMemory's documented
   free/anonymous-tier limit — a request over that length doesn't error,
   it comes back HTTP 200 with a **silently truncated** translation, which

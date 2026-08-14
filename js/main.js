@@ -399,10 +399,11 @@ function findHistoryMatch(source, target, text) {
 // right on the result instead of silently looking like a quality bug.
 const PROVIDER_LABELS = { libretranslate: 'LibreTranslate', mymemory: 'MyMemory' };
 
-function describeTranslationSource(usedDictionary, provider) {
+function describeTranslationSource(usedDictionary, provider, googleError) {
   if (usedDictionary) return 'Offline word dictionary — approximate, not a full translation';
   if (provider && provider !== 'google' && provider !== 'offline-model') {
-    return `Translated via ${PROVIDER_LABELS[provider] || provider} (Google unavailable)`;
+    const reason = googleError ? ` — Google error: ${googleError}` : '';
+    return `Translated via ${PROVIDER_LABELS[provider] || provider} (Google unavailable${reason})`;
   }
   return null;
 }
@@ -432,6 +433,7 @@ async function runTranslate() {
     let detectedLanguage;
     let usedDictionary = false;
     let provider = null;
+    let googleError = null;
     if (useOffline) {
       try {
         translatedText = await offline.translateOffline(source, target, text);
@@ -453,6 +455,8 @@ async function runTranslate() {
         translatedText = result.translatedText;
         detectedLanguage = result.detectedLanguage;
         provider = result.provider;
+        const googleFailure = (result.failures || []).find((f) => f.id === 'google');
+        if (googleFailure) googleError = googleFailure.message;
       } catch (apiErr) {
         // Every server is unreachable. First choice: have we translated
         // this exact text for this exact pair before? If so, replay that
@@ -467,6 +471,7 @@ async function runTranslate() {
           detectedLanguage = historyMatch.detectedLanguage || null;
           usedDictionary = Boolean(historyMatch.usedDictionary);
           provider = historyMatch.provider || null;
+          googleError = historyMatch.googleError || null;
         } else if (source !== 'auto' && hasDictionary(source, target)) {
           const result = translateWithDictionary(text, source, target);
           translatedText = result.text;
@@ -486,7 +491,7 @@ async function runTranslate() {
     el.resultText.textContent = translatedText;
     fitResultFontSize(translatedText);
     el.resultBlock.hidden = false;
-    const note = describeTranslationSource(usedDictionary, provider);
+    const note = describeTranslationSource(usedDictionary, provider, googleError);
     el.translationNote.textContent = note || '';
     el.translationNote.hidden = !note;
 
@@ -506,6 +511,7 @@ async function runTranslate() {
       detectedLanguage: detectedLanguage || null,
       provider: provider || null,
       usedDictionary,
+      googleError: googleError || null,
       timestamp: Date.now(),
     };
     const id = await db.addEntry(entry);
@@ -638,7 +644,7 @@ function restoreEntry(entry) {
   el.resultText.textContent = entry.translatedText;
   fitResultFontSize(entry.translatedText);
   el.resultBlock.hidden = false;
-  const note = describeTranslationSource(Boolean(entry.usedDictionary), entry.provider || null);
+  const note = describeTranslationSource(Boolean(entry.usedDictionary), entry.provider || null, entry.googleError || null);
   el.translationNote.textContent = note || '';
   el.translationNote.hidden = !note;
   hideError();

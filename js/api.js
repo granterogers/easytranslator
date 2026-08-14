@@ -302,14 +302,20 @@ export async function translateText({ text, source, target }) {
   // skipped silently — its "not supported" rejection must never overwrite
   // a real attempt's more useful error message below.
   let lastErr;
+  const failures = [];
   for (const provider of providers) {
     if (!provider.supported) continue;
     try {
       const result = await provider.run();
       localStorage.setItem(PROVIDER_KEY, provider.id);
-      return { ...result, provider: provider.id };
+      // Carry along *why* any earlier provider(s) failed on this call — this
+      // is what lets the UI say "Google error: <real reason>" instead of a
+      // vague "unavailable", so a persistent Google failure is diagnosable
+      // from the app itself instead of needing devtools on the device.
+      return { ...result, provider: provider.id, failures };
     } catch (err) {
       lastErr = err;
+      failures.push({ id: provider.id, message: err.message });
       console.warn(`[translate] ${provider.id} failed:`, err.message);
     }
   }

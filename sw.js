@@ -10,7 +10,7 @@
 //
 // Keep APP_VERSION in sync with js/version.js (this file can't import it —
 // it runs as a classic worker script, not a module) — bump both on deploy.
-const APP_VERSION = '1.6.4';
+const APP_VERSION = '1.7.0';
 const CACHE_PREFIX = 'translate-history-v';
 const CACHE_NAME = `${CACHE_PREFIX}${APP_VERSION}`;
 
@@ -22,8 +22,6 @@ const APP_SHELL = [
   './js/db.js',
   './js/api.js',
   './js/version.js',
-  './js/offline-models.js',
-  './js/translate-worker.js',
   './js/transliterate.js',
   './js/dictionary.js',
   './manifest.webmanifest',
@@ -42,12 +40,9 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      // Only ever delete OUR OWN old versioned caches. Deleting anything
-      // that doesn't match CACHE_NAME (as this used to) also deletes the
-      // separate Cache Storage entry the offline-translation library
-      // (js/translate-worker.js) uses to persist downloaded models —
-      // wiping out every downloaded language pack on every single
-      // deploy, since a version bump changes CACHE_NAME every time.
+      // Only ever delete OUR OWN old versioned caches — never touch a
+      // Cache Storage entry that doesn't start with our own prefix, in
+      // case something else on the origin ever uses Cache Storage too.
       .then((keys) => Promise.all(
         keys.filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME).map((key) => caches.delete(key))
       ))

@@ -1,6 +1,5 @@
 import * as db from './db.js';
 import * as api from './api.js';
-import * as offline from './offline-models.js';
 import { transliterateBulgarian } from './transliterate.js';
 import { hasDictionary, translateWithDictionary } from './dictionary.js';
 import { APP_VERSION } from './version.js';
@@ -21,8 +20,6 @@ const el = {
   sourceLang: $('sourceLang'),
   targetLang: $('targetLang'),
   swapBtn: $('swapBtn'),
-  offlineBtn: $('offlineBtn'),
-  offlineBtnBadge: $('offlineBtnBadge'),
   sourceText: $('sourceText'),
   statusLabel: $('statusLabel'),
   detectedLabel: $('detectedLabel'),
@@ -39,7 +36,6 @@ const el = {
   historyNoResults: $('historyNoResults'),
   searchInput: $('searchInput'),
   clearAllBtn: $('clearAllBtn'),
-  historyCountBadge: $('historyCountBadge'),
   tabBtns: Array.from(document.querySelectorAll('.tab-btn[data-target]')),
   toast: $('toast'),
   versionTag: $('versionTag'),
@@ -181,7 +177,6 @@ function onLangChange(changedCode) {
   persistLanguageChoice();
   recordRecentLanguages(changedCode);
   refreshLanguageOptions(languages); // re-sort with the freshly-updated recency ranks
-  refreshOfflineUI();
   clearTimeout(debounceTimer);
   runTranslate();
 }
@@ -212,107 +207,6 @@ el.swapBtn.addEventListener('click', () => {
   persistLanguageChoice();
   recordRecentLanguages(t, s);
   refreshLanguageOptions(languages);
-  refreshOfflineUI();
-});
-
-// ---------- Offline (on-device) model download ----------
-
-let offlineDownloadInFlight = false;
-
-// The button is a small icon now, not a text pill — the full descriptive
-// label lives in title/aria-label (for hover/screen readers) instead of
-// visible text; the badge only ever shows the live download percentage.
-function setOfflineButtonState(state, label, pct) {
-  el.offlineBtn.classList.toggle('is-error', state === 'error');
-  el.offlineBtn.title = label;
-  el.offlineBtn.setAttribute('aria-label', label);
-  el.offlineBtn.querySelector('.offline-icon-download').hidden = state === 'downloading';
-  el.offlineBtn.querySelector('.offline-icon-spinner').hidden = state !== 'downloading';
-  el.offlineBtnBadge.hidden = state !== 'downloading';
-  if (state === 'downloading') el.offlineBtnBadge.textContent = String(Math.round(pct || 0));
-}
-
-// Once a pair is downloaded there's nothing left to tap — the ✓ in the
-// dropdown options (see updateDownloadTicks) is the only indicator needed,
-// so the button itself goes away rather than sticking around as a
-// "downloaded" pill. It reappears automatically if the pack goes missing
-// (see runTranslate's offline-path catch) so there's still a way back in.
-function updateOfflineButton() {
-  if (offlineDownloadInFlight) return; // don't clobber an in-progress download's UI
-  const source = el.sourceLang.value;
-  const target = el.targetLang.value;
-
-  if (source === 'auto' || offline.isPairDownloaded(source, target)) {
-    el.offlineBtn.hidden = true;
-    return;
-  }
-  el.offlineBtn.hidden = false;
-
-  const srcLabel = langLabel(source);
-  const tgtLabel = langLabel(target);
-  setOfflineButtonState('idle', `Download ${srcLabel} → ${tgtLabel} for offline`);
-}
-
-// Marks each dropdown option with a ✓ when downloading it (paired with
-// whatever's currently selected in the *other* dropdown) would complete an
-// already-downloaded offline pair. Rewrites option text in place rather
-// than rebuilding the <select>, so it doesn't disturb scroll position or
-// an open picker.
-function updateDownloadTicks() {
-  const source = el.sourceLang.value;
-  const target = el.targetLang.value;
-
-  Array.from(el.targetLang.options).forEach((opt) => {
-    const downloaded = source !== 'auto' && offline.isPairDownloaded(source, opt.value);
-    opt.textContent = (downloaded ? '✓ ' : '') + langLabel(opt.value);
-  });
-
-  Array.from(el.sourceLang.options).forEach((opt) => {
-    if (opt.value === 'auto') return;
-    const downloaded = Boolean(target) && offline.isPairDownloaded(opt.value, target);
-    opt.textContent = (downloaded ? '✓ ' : '') + langLabel(opt.value);
-  });
-}
-
-function refreshOfflineUI() {
-  updateOfflineButton();
-  updateDownloadTicks();
-}
-
-el.offlineBtn.addEventListener('click', async () => {
-  const source = el.sourceLang.value;
-  const target = el.targetLang.value;
-  const tgtLabel = langLabel(target);
-
-  if (offlineDownloadInFlight) return;
-  offlineDownloadInFlight = true;
-  setOfflineButtonState('downloading', `Downloading ${tgtLabel}… 0%`, 0);
-
-  try {
-    await offline.downloadPair(source, target, (p) => {
-      const pct = Math.round((p.pct || 0));
-      setOfflineButtonState('downloading', `Downloading ${tgtLabel}… ${pct}%`, pct);
-    });
-    offlineDownloadInFlight = false;
-    refreshOfflineUI();
-    showToast(`${tgtLabel} is ready to use offline`);
-    scheduleTranslate(); // if there's text sitting there, retranslate using the model that just finished
-  } catch (err) {
-    offlineDownloadInFlight = false;
-    const message = (err && err.message) || '';
-    // Hugging Face returns this exact wording both for private/gated repos
-    // and for ones that simply don't exist — in practice here it means no
-    // one has published an offline model for this specific language pair,
-    // not a connection problem retrying would fix.
-    const label = /unauthorized access to file/i.test(message)
-      ? `${tgtLabel} isn't available for offline use yet — translation keeps working online`
-      : `Couldn't download ${tgtLabel}: ${message.slice(0, 120) || 'unknown error'} — tap to retry`;
-    setOfflineButtonState('error', label);
-    // The button is icon-only now, so a hover-only title wouldn't be seen
-    // on a touch device — a toast makes sure the error is actually noticed.
-    showToast(label);
-    console.error('[offline]', err);
-  }
 });
 
 // ---------- Copy translated text ----------
@@ -401,7 +295,7 @@ const PROVIDER_LABELS = { libretranslate: 'LibreTranslate', mymemory: 'MyMemory'
 
 function describeTranslationSource(usedDictionary, provider, googleError) {
   if (usedDictionary) return 'Offline word dictionary — approximate, not a full translation';
-  if (provider && provider !== 'google' && provider !== 'offline-model') {
+  if (provider && provider !== 'google') {
     const reason = googleError ? ` — Google error: ${googleError}` : '';
     return `Translated via ${PROVIDER_LABELS[provider] || provider} (Google unavailable${reason})`;
   }
@@ -428,58 +322,39 @@ async function runTranslate() {
   setBusy(true);
 
   try {
-    const useOffline = source !== 'auto' && offline.isPairDownloaded(source, target);
     let translatedText;
     let detectedLanguage;
     let usedDictionary = false;
     let provider = null;
     let googleError = null;
-    if (useOffline) {
-      try {
-        translatedText = await offline.translateOffline(source, target, text);
+    try {
+      const result = await api.translateText({ text, source, target });
+      translatedText = result.translatedText;
+      detectedLanguage = result.detectedLanguage;
+      provider = result.provider;
+      googleError = result.googleError || null;
+    } catch (apiErr) {
+      // Every server is unreachable. First choice: have we translated
+      // this exact text for this exact pair before? If so, replay that
+      // real result — no quality loss, works for any language pair, and
+      // only gets more useful the more the app is used. Only if that
+      // misses do we fall back further to the small bundled word-for-word
+      // dictionary, which IS a quality loss (no grammar or word order),
+      // so that path stays clearly labeled as approximate.
+      const historyMatch = source !== 'auto' ? findHistoryMatch(source, target, text) : null;
+      if (historyMatch) {
+        translatedText = historyMatch.translatedText;
+        detectedLanguage = historyMatch.detectedLanguage || null;
+        usedDictionary = Boolean(historyMatch.usedDictionary);
+        provider = historyMatch.provider || null;
+        googleError = historyMatch.googleError || null;
+      } else if (source !== 'auto' && hasDictionary(source, target)) {
+        const result = translateWithDictionary(text, source, target);
+        translatedText = result.text;
         detectedLanguage = null;
-        provider = 'offline-model';
-      } catch (offlineErr) {
-        // The pack was recorded as downloaded, but the underlying model
-        // files are gone (e.g. evicted by the browser under storage
-        // pressure — the Bulgarian fallback model alone is a few hundred
-        // MB). Forget it and let the button reappear instead of failing
-        // the same way on every future keystroke with no way back in.
-        offline.forgetPair(source, target);
-        refreshOfflineUI();
-        throw new Error(`The offline pack for ${langLabel(target)} is no longer available — tap "Download for offline" to get it again.`);
-      }
-    } else {
-      try {
-        const result = await api.translateText({ text, source, target });
-        translatedText = result.translatedText;
-        detectedLanguage = result.detectedLanguage;
-        provider = result.provider;
-        const googleFailure = (result.failures || []).find((f) => f.id === 'google');
-        if (googleFailure) googleError = googleFailure.message;
-      } catch (apiErr) {
-        // Every server is unreachable. First choice: have we translated
-        // this exact text for this exact pair before? If so, replay that
-        // real result — no quality loss, works for any language pair, and
-        // only gets more useful the more the app is used. Only if that
-        // misses do we fall back further to the small bundled word-for-word
-        // dictionary, which IS a quality loss (no grammar or word order),
-        // so that path stays clearly labeled as approximate.
-        const historyMatch = source !== 'auto' ? findHistoryMatch(source, target, text) : null;
-        if (historyMatch) {
-          translatedText = historyMatch.translatedText;
-          detectedLanguage = historyMatch.detectedLanguage || null;
-          usedDictionary = Boolean(historyMatch.usedDictionary);
-          provider = historyMatch.provider || null;
-          googleError = historyMatch.googleError || null;
-        } else if (source !== 'auto' && hasDictionary(source, target)) {
-          const result = translateWithDictionary(text, source, target);
-          translatedText = result.text;
-          detectedLanguage = null;
-          usedDictionary = true;
-        } else {
-          throw apiErr;
-        }
+        usedDictionary = true;
+      } else {
+        throw apiErr;
       }
     }
     if (token !== translateToken) return; // superseded by newer input/language change
@@ -614,13 +489,6 @@ function renderHistory() {
 
   el.historyEmpty.hidden = allEntries.length !== 0;
   el.historyNoResults.hidden = !(allEntries.length > 0 && query && filtered.length === 0);
-
-  if (allEntries.length > 0) {
-    el.historyCountBadge.hidden = false;
-    el.historyCountBadge.textContent = allEntries.length > 99 ? '99+' : String(allEntries.length);
-  } else {
-    el.historyCountBadge.hidden = true;
-  }
 }
 
 function restoreEntry(entry) {
@@ -637,7 +505,6 @@ function restoreEntry(entry) {
   recordRecentLanguages(entry.targetLang);
   if (entry.sourceLang !== 'en') recordRecentLanguages(entry.sourceLang);
   refreshLanguageOptions(languages);
-  refreshOfflineUI();
 
   el.sourceText.value = entry.sourceText;
   toggleClearButton();
@@ -660,7 +527,6 @@ function restoreEntry(entry) {
 }
 
 async function handleDelete(id) {
-  if (!window.confirm('Delete this translation?')) return;
   await db.deleteEntry(id);
   allEntries = allEntries.filter((e) => e.id !== id);
   renderHistory();
@@ -736,8 +602,7 @@ async function init() {
   // disturbing whatever the user has already selected.
   renderLanguageOptions(api.FALLBACK_LANGUAGES);
   applyLanguageDefaults();
-  refreshOfflineUI();
-  api.fetchLanguages().then(refreshLanguageOptions).then(refreshOfflineUI).catch(() => {});
+  api.fetchLanguages().then(refreshLanguageOptions).catch(() => {});
 
   allEntries = await db.getAllEntries();
   renderHistory();

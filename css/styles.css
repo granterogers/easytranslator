@@ -111,7 +111,7 @@ button, input, select, textarea {
 
 .lang-row {
   display: grid;
-  grid-template-columns: 1fr 48px 1fr 30px;
+  grid-template-columns: 1fr 48px 1fr;
   align-items: center;
   gap: 8px;
   margin: 0 0 16px;
@@ -143,56 +143,6 @@ button, input, select, textarea {
 }
 
 .swap-btn svg { width: 20px; height: 20px; fill: var(--accent); }
-
-/* ---------- Offline model download ---------- */
-
-.offline-btn[hidden] { display: none; }
-
-.offline-btn {
-  position: relative;
-  flex-shrink: 0;
-  width: 30px;
-  height: 30px;
-  min-width: 30px;
-  min-height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  cursor: pointer;
-}
-
-.offline-btn:active { background: var(--border); }
-
-.offline-btn.is-error { border-color: rgba(248, 113, 113, 0.4); }
-.offline-btn.is-error .offline-icon-download { fill: var(--danger); }
-
-.offline-icon { width: 15px; height: 15px; flex-shrink: 0; fill: var(--text-dim); }
-.offline-icon[hidden] { display: none; }
-
-.offline-icon-spinner { width: 13px; height: 13px; flex-shrink: 0; }
-.offline-icon-spinner[hidden] { display: none; }
-
-.offline-badge[hidden] { display: none; }
-
-.offline-badge {
-  position: absolute;
-  bottom: -3px;
-  right: -3px;
-  min-width: 15px;
-  height: 13px;
-  padding: 0 3px;
-  border-radius: 7px;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-size: 8px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
 
 /* ---------- Text fields ---------- */
 
@@ -494,32 +444,12 @@ button, input, select, textarea {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  position: relative;
 }
 
 .tab-btn svg { width: 24px; height: 24px; fill: var(--text-faint); }
 
 .tab-btn.active { color: var(--accent); }
 .tab-btn.active svg { fill: var(--accent); }
-
-.badge[hidden] { display: none; }
-
-.badge {
-  position: absolute;
-  top: 4px;
-  right: calc(50% - 26px);
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-size: 10px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
 
 .version-tag {
   text-align: center;

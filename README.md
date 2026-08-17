@@ -7,22 +7,23 @@ translation saved automatically to a searchable local history.
 - Translates live as you type (word by word), no button to press. Result
   text shrinks as the translation gets longer, so it stays visible above
   the keyboard.
-- Two translation paths: a public [LibreTranslate](https://libretranslate.com/)
-  server (**no API key required**) by default, or an on-device model you
-  download once per language pair for instant, fully offline translation.
-  If neither is available for a pair, a small bundled word-for-word
-  dictionary kicks in as a last resort (see below).
+- Translates via a public [LibreTranslate](https://libretranslate.com/)
+  server and other free providers (**no API key required** — see
+  Translation server below). If every server is unreachable, it falls
+  back to your own translation history and then a small bundled
+  word-for-word dictionary as a last resort (see below).
 - Bulgarian output is shown romanized (Latin script), not Cyrillic.
 - A small copy icon sits on the translated text — tap it to copy the
   result to your clipboard. The input box has a matching small clear
   (✕) icon in its corner instead of a separate "Clear" text link.
 - Both language dropdowns always show your most recently used languages
-  first, and mark any language that already has a downloaded offline
-  pair with a ✓.
+  first.
 - Minimal chrome — no header, no Settings screen, and the language row
   can be collapsed to make more room for reading.
 - History is stored locally in **IndexedDB** and persists forever on the
-  device until you delete it.
+  device until you delete it. Deleting a single entry is immediate, no
+  confirmation prompt — only "Clear all" (wiping everything at once)
+  still asks first.
 - Installable as a PWA, optimized for iPhone Safari, dark mode only.
 
 ## Running it
@@ -49,29 +50,11 @@ a separate independent public translation API. Whichever one actually
 answers is remembered so it's tried first next time — there's no Settings
 screen to pin a specific one manually, it's fully automatic.
 
-## Offline (on-device) translation
-
-Tap the small download icon next to the language row's collapse arrow to
-download a small neural translation model for the current language pair
-(hover or long-press it to see which pair it'll download). Once
-downloaded, that pair translates instantly with zero network calls —
-works on a plane, works if every public mirror is down. Models are cached
-by the browser (tens of MB per pair), so this is a one-time download per
-pair, not per session. The icon disappears once a pair is downloaded — a
-✓ next to the language name in the dropdowns is the only remaining
-indicator.
-
-Language pairs without a downloaded model keep using the server path
-above automatically. A pair with no dedicated model published anywhere
-(Bulgarian, at least, as of writing) isn't offered a full neural download
-at all — an earlier version fell back to a single much-larger multilingual
-model, but that fallback was removed after it was confirmed to crash
-mobile Safari mid-download.
-
 ## Offline fallbacks (last resort)
 
-If every server is unreachable and there's no neural model for the
-current pair, the app doesn't just fail:
+There's no on-device/downloadable translation model — every translation
+goes through the server providers above. If every server is unreachable,
+the app doesn't just fail:
 
 1. **Your own history first.** If you've translated this exact phrase
    before while online — through any of the providers above — retyping
@@ -81,27 +64,23 @@ current pair, the app doesn't just fail:
    past usage, growing automatically the more you use the app.
 2. **Bundled word dictionary**, only if the phrase has never been
    translated before. A small built-in word-for-word list (~500 entries
-   for English → Bulgarian today) — enough to get the gist of a few
-   words across with zero network and zero download. It's word-by-word
-   only (no grammar or word order), so results are labeled "approximate,
-   not a full translation" rather than presented as a real translation.
-Today this only covers English → Bulgarian, the one pair that needs it.
+   for English → Bulgarian today, the one pair that needs it) — enough
+   to get the gist of a few words across with zero network and zero
+   download. It's word-by-word only (no grammar or word order), so
+   results are labeled "approximate, not a full translation" rather
+   than presented as a real translation.
 
 ## Project layout
 
 - `index.html` — app shell and markup
 - `css/styles.css` — dark, mobile-first styling
-- `js/api.js` — translation client: LibreTranslate mirrors, then MyMemory
+- `js/api.js` — translation client: Google, LibreTranslate mirrors, MyMemory
 - `js/db.js` — IndexedDB wrapper for history
-- `js/offline-models.js` — main-thread manager for on-device models: which
-  pairs are downloaded, and a Promise-based wrapper around the worker
-- `js/translate-worker.js` — runs the on-device model in a Worker so
-  downloading/inference never blocks the UI
 - `js/transliterate.js` — Cyrillic→Latin romanization for Bulgarian
-- `js/dictionary.js` — bundled word-for-word dictionary, last-resort
-  fallback when both the servers and any neural model are unavailable
-- `js/main.js` — UI wiring: tabs, translate flow, history,
-  offline-download button, recent-language ordering
+- `js/dictionary.js` — bundled word-for-word dictionary, last resort when
+  no server is reachable and there's no matching history entry to replay
+- `js/main.js` — UI wiring: tabs, translate flow, history, recent-language
+  ordering
 - `sw.js` — service worker caching the app shell for offline use
 - `manifest.webmanifest` — PWA install metadata
 - `icons/` — app icons (source/regen instructions in `scripts/icon-source.html`)
@@ -110,6 +89,5 @@ Today this only covers English → Bulgarian, the one pair that needs it.
 
 No data ever leaves your device except the text you choose to translate,
 which is sent directly from your browser to whichever translation service
-answered last (see Translation server above) — or nowhere at all, for a
-downloaded offline pair. There is no analytics, no accounts, and no
-server of ours in the loop.
+answered last (see Translation server above). There is no analytics, no
+accounts, and no server of ours in the loop.

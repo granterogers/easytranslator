@@ -18,7 +18,12 @@ const CANDIDATE_ENDPOINTS = [
   'https://translate.fedilab.app',
 ];
 
-const REQUEST_TIMEOUT_MS = 8000;
+// Lower than a typical "generous" API timeout on purpose: a slow provider
+// is indistinguishable from a dead one to the user, and every provider
+// here is a plain text-translation call that should answer in well under
+// a second when actually up — this just bounds how long a genuinely dead
+// one can stall the fallback chain before the next provider gets a turn.
+const REQUEST_TIMEOUT_MS = 5000;
 
 // Exported so the UI can render the language dropdowns instantly on
 // launch instead of waiting on a network round trip first (see
@@ -277,15 +282,30 @@ async function translateViaGoogleUnofficial(text, source, target) {
 }
 
 const PROVIDER_KEY = 'lt_provider_resolved';
+const GOOGLE_ERROR_KEY = 'lt_google_last_error';
 
-// Once a non-Google provider is remembered as reliable, the "steady state"
-// skip-ahead below means Google is never attempted again for the rest of
-// this page load — so a single early Google failure would otherwise hide
-// the real reason forever (no fresh `failures` entry to report) AND Google
-// would never get a chance to be noticed as recovered. Forcing one real
-// attempt per session bounds that cost to once per launch, not once per
-// keystroke, while keeping the fast path for every translation after it.
+// Once a non-Google provider is remembered as reliable, the translation
+// itself never waits on Google again — but we still want to know if it's
+// come back, and why it's failing if not. checkGoogleInBackground() fires
+// a real Google attempt without being awaited by the caller, so it can
+// never add latency to the translation actually shown to the user; its
+// outcome just updates localStorage for whichever call reads it next
+// (this one, if it resolves in time, or a future one otherwise). Bounded
+// to once per page load so it doesn't turn into a background request on
+// every keystroke.
 let googleCheckedThisSession = false;
+
+function checkGoogleInBackground(text, source, target) {
+  translateViaGoogleUnofficial(text, source, target)
+    .then(() => {
+      localStorage.setItem(PROVIDER_KEY, 'google');
+      localStorage.removeItem(GOOGLE_ERROR_KEY);
+    })
+    .catch((err) => {
+      console.warn('[translate] google failed (background check):', err.message);
+      localStorage.setItem(GOOGLE_ERROR_KEY, err.message);
+    });
+}
 
 // Three independent providers, tried in whichever order worked last time
 // (so once one proves reliable for this user, we go straight to it instead
@@ -305,29 +325,32 @@ export async function translateText({ text, source, target }) {
     },
   ];
   const preferred = localStorage.getItem(PROVIDER_KEY);
-  if (preferred && googleCheckedThisSession) {
+  if (preferred && preferred !== 'google') {
+    if (!googleCheckedThisSession) {
+      googleCheckedThisSession = true;
+      checkGoogleInBackground(text, source, target);
+    }
     providers.sort((a, b) => (a.id === preferred ? -1 : b.id === preferred ? 1 : 0));
   }
-  googleCheckedThisSession = true;
 
   // A provider that doesn't apply here (e.g. MyMemory + auto-detect) is
   // skipped silently — its "not supported" rejection must never overwrite
   // a real attempt's more useful error message below.
   let lastErr;
-  const failures = [];
   for (const provider of providers) {
     if (!provider.supported) continue;
     try {
       const result = await provider.run();
       localStorage.setItem(PROVIDER_KEY, provider.id);
-      // Carry along *why* any earlier provider(s) failed on this call — this
-      // is what lets the UI say "Google error: <real reason>" instead of a
-      // vague "unavailable", so a persistent Google failure is diagnosable
-      // from the app itself instead of needing devtools on the device.
-      return { ...result, provider: provider.id, failures };
+      if (provider.id === 'google') localStorage.removeItem(GOOGLE_ERROR_KEY);
+      // Surface *why* Google is currently down (from this call's own
+      // attempt, or the last background check) so the UI can say "Google
+      // error: <real reason>" instead of a vague "unavailable".
+      const googleError = provider.id === 'google' ? null : localStorage.getItem(GOOGLE_ERROR_KEY);
+      return { ...result, provider: provider.id, googleError };
     } catch (err) {
       lastErr = err;
-      failures.push({ id: provider.id, message: err.message });
+      if (provider.id === 'google') localStorage.setItem(GOOGLE_ERROR_KEY, err.message);
       console.warn(`[translate] ${provider.id} failed:`, err.message);
     }
   }

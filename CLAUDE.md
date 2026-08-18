@@ -32,6 +32,23 @@
   history entry, swap) — those don't fire a real `input` event, so
   skipping this would leave the tracking comparing against a stale
   snapshot from before the change.
+- **The actual old-text-stripping mutation is deferred one tick
+  (`setTimeout(..., 0)`), not applied synchronously inside the `input`
+  handler.** Confirmed on a real device: rewriting `sourceText.value`
+  synchronously, in the same tick as iOS dictation's own insertion into
+  that same field, stalls the dictation engine for the better part of a
+  minute before it catches up and flushes whatever it was in the middle
+  of inserting — presumably because the external mutation invalidates
+  whatever position/selection bookkeeping the OS keeps for that field
+  mid-insertion. The deferred callback re-checks
+  `el.sourceText.value !== value` (the value captured when it was
+  scheduled) before touching anything, so if another chunk of dictated
+  text arrives in the meantime, the callback backs off instead of
+  clobbering it — the strip is simply skipped for that round rather than
+  risking the same stall, since real dictation chunks are spaced far
+  enough apart in practice that this is rare. Don't move this back to a
+  synchronous mutation even though it looks unnecessary in a quick
+  manual/desktop test — the bug only shows up under real iOS dictation.
 - `#phraseLed` (below the source textarea, `updatePhraseLed()` in
   `js/main.js`) visualizes that same pause window: red while the box has
   text and less than `getPhraseGapMs()` has elapsed since the last

@@ -295,13 +295,28 @@ function syncInputTracking() {
 el.sourceText.addEventListener('input', () => {
   const now = Date.now();
   const gap = now - lastInputAt;
+  const previousValue = lastInputValue;
   lastInputAt = now;
 
   const value = el.sourceText.value;
-  if (gap >= getPhraseGapMs() && lastInputValue && value.startsWith(lastInputValue) && value.length > lastInputValue.length) {
-    el.sourceText.value = value.slice(lastInputValue.length).replace(/^\s+/, '');
+  lastInputValue = value;
+
+  if (gap >= getPhraseGapMs() && previousValue && value.startsWith(previousValue) && value.length > previousValue.length) {
+    // Deferred to a separate task rather than mutated synchronously right
+    // here — rewriting a focused field's value in the same tick as the
+    // OS's own text insertion into it has been observed to confuse iOS
+    // dictation, stalling it for the better part of a minute before it
+    // catches up and flushes whatever it was in the middle of inserting.
+    // A 0ms timeout is enough to get outside that tick without any
+    // perceptible delay for the user.
+    setTimeout(() => {
+      if (el.sourceText.value !== value) return; // something else changed it since
+      el.sourceText.value = value.slice(previousValue.length).replace(/^\s+/, '');
+      lastInputValue = el.sourceText.value;
+      toggleClearButton();
+      scheduleTranslate();
+    }, 0);
   }
-  lastInputValue = el.sourceText.value;
 
   updatePhraseLed();
   toggleClearButton();

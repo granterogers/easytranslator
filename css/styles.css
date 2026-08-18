@@ -244,6 +244,8 @@ button, input, select, textarea {
   box-shadow: 0 0 6px 0 rgba(74, 222, 128, 0.6);
 }
 
+.phrase-led[hidden] { display: none; }
+
 .detected-label {
   font-size: 13px;
   color: var(--text-dim);

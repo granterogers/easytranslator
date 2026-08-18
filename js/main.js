@@ -15,14 +15,20 @@ const WORD_BOUNDARY_RE = /[\s.,!?;:\n]$/;
 // How long a pause (mainly meant for dictation — see the sourceText
 // 'input' listener) has to be before the next arriving text is treated as
 // a new phrase rather than a continuation. Adjustable via #phraseGapInput
-// in the Settings tab.
+// in the Settings tab; 0 means "off" (`Infinity` so the gap check below
+// never fires) — a guaranteed way to fully disable the auto-reset if it
+// ever causes trouble, since this feature mutates a field iOS dictation
+// is actively typing into, which is inherently a little risky and can't
+// be fully verified without a real device.
 const PHRASE_GAP_KEY = 'lt_phrase_gap_ms';
 const DEFAULT_PHRASE_GAP_MS = 4000;
+const PHRASE_STRIP_QUIET_MS = 700;
 
 const THEME_KEY = 'lt_theme';
 
 function getPhraseGapMs() {
   const stored = Number(localStorage.getItem(PHRASE_GAP_KEY));
+  if (stored === 0) return Infinity;
   return stored > 0 ? stored : DEFAULT_PHRASE_GAP_MS;
 }
 
@@ -271,10 +277,14 @@ let lastInputValue = '';
 // Red while the box has text and the pause threshold above hasn't
 // elapsed since the last keystroke/dictated chunk (more speech now would
 // extend the current phrase); green once it has, or whenever the box is
-// empty. Polled on an interval rather than only on 'input' because the
+// empty. Hidden entirely when the feature is off (see getPhraseGapMs()).
+// Polled on an interval rather than only on 'input' because the
 // red→green transition happens passively as time passes, with no event
 // of its own to react to.
 function updatePhraseLed() {
+  const disabled = !Number.isFinite(getPhraseGapMs());
+  el.phraseLed.hidden = disabled;
+  if (disabled) return;
   const hasText = el.sourceText.value.trim().length > 0;
   const ready = !hasText || (Date.now() - lastInputAt) >= getPhraseGapMs();
   el.phraseLed.classList.toggle('is-ready', ready);
@@ -289,8 +299,14 @@ setInterval(updatePhraseLed, 250);
 function syncInputTracking() {
   lastInputAt = Date.now();
   lastInputValue = el.sourceText.value;
+  pendingStripPrefix = null;
   updatePhraseLed();
 }
+
+// The prefix (text from before the detected pause) waiting to be
+// stripped once things go quiet again — see the 'input' listener below.
+let pendingStripPrefix = null;
+let stripTimer = null;
 
 el.sourceText.addEventListener('input', () => {
   const now = Date.now();
@@ -302,20 +318,30 @@ el.sourceText.addEventListener('input', () => {
   lastInputValue = value;
 
   if (gap >= getPhraseGapMs() && previousValue && value.startsWith(previousValue) && value.length > previousValue.length) {
-    // Deferred to a separate task rather than mutated synchronously right
-    // here — rewriting a focused field's value in the same tick as the
-    // OS's own text insertion into it has been observed to confuse iOS
-    // dictation, stalling it for the better part of a minute before it
-    // catches up and flushes whatever it was in the middle of inserting.
-    // A 0ms timeout is enough to get outside that tick without any
-    // perceptible delay for the user.
-    setTimeout(() => {
-      if (el.sourceText.value !== value) return; // something else changed it since
-      el.sourceText.value = value.slice(previousValue.length).replace(/^\s+/, '');
+    pendingStripPrefix = previousValue;
+  }
+
+  // Rewriting a focused field's value in the same tick — or even shortly
+  // after — the OS's own text insertion into it has been observed on a
+  // real device to confuse iOS dictation, stalling it for the better
+  // part of a minute before it catches up and flushes whatever it was in
+  // the middle of inserting. So the actual strip only happens once
+  // PHRASE_STRIP_QUIET_MS has passed with no further input at all —
+  // every new chunk of dictated text (including ones for the SAME new
+  // phrase, arriving in quick succession as speech is recognized)
+  // re-arms this timer rather than the strip firing mid-utterance.
+  if (pendingStripPrefix !== null) {
+    clearTimeout(stripTimer);
+    stripTimer = setTimeout(() => {
+      const prefix = pendingStripPrefix;
+      pendingStripPrefix = null;
+      const current = el.sourceText.value;
+      if (!prefix || !current.startsWith(prefix) || current.length <= prefix.length) return;
+      el.sourceText.value = current.slice(prefix.length).replace(/^\s+/, '');
       lastInputValue = el.sourceText.value;
       toggleClearButton();
       scheduleTranslate();
-    }, 0);
+    }, PHRASE_STRIP_QUIET_MS);
   }
 
   updatePhraseLed();
@@ -651,14 +677,20 @@ function initVersionTag() {
   if (el.versionTag) el.versionTag.textContent = `v${APP_VERSION}`;
 }
 
+function formatPhraseGapLabel(seconds) {
+  return seconds <= 0 ? 'Off' : `${seconds.toFixed(1)}s`;
+}
+
 function initPhraseGapControl() {
-  const seconds = getPhraseGapMs() / 1000;
+  const storedMs = Number(localStorage.getItem(PHRASE_GAP_KEY));
+  const seconds = storedMs > 0 ? storedMs / 1000 : (storedMs === 0 ? 0 : DEFAULT_PHRASE_GAP_MS / 1000);
   el.phraseGapInput.value = String(seconds);
-  el.phraseGapValue.textContent = seconds.toFixed(1);
+  el.phraseGapValue.textContent = formatPhraseGapLabel(seconds);
   el.phraseGapInput.addEventListener('input', () => {
     const value = Number(el.phraseGapInput.value);
-    el.phraseGapValue.textContent = value.toFixed(1);
+    el.phraseGapValue.textContent = formatPhraseGapLabel(value);
     localStorage.setItem(PHRASE_GAP_KEY, String(Math.round(value * 1000)));
+    updatePhraseLed();
   });
 }
 

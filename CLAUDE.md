@@ -9,6 +9,29 @@
   short debounce, and a longer one mid-word (`WORD_BOUNDARY_DEBOUNCE_MS` /
   `MID_WORD_DEBOUNCE_MS` in `js/main.js`) — the goal is visibly updating
   word-by-word, not waiting for the user to stop typing entirely.
+- `sourceText`'s 'input' listener also tracks the gap since the previous
+  keystroke/dictated chunk (`lastInputAt`/`lastInputValue`). If that gap
+  is at least `getPhraseGapMs()` (adjustable via `#phraseGapInput` in the
+  History view, default 4s, `lt_phrase_gap_ms` in `localStorage`) AND the
+  new value is the old value with more text appended, the old text is
+  dropped and only the newly-arrived part is kept. This exists for
+  dictation specifically: the iOS keyboard's mic types straight into the
+  focused field, so without this, everything said in one sitting would
+  pile up into one ever-growing block instead of each pause-separated
+  thing becoming its own translation (the already-completed phrase is
+  already saved to history by the live-translate flow by the time the
+  pause is detected, since `MID_WORD_DEBOUNCE_MS` is far shorter than any
+  sane pause setting — this only affects what's left sitting in the input
+  box, not what already got saved). There's no way to distinguish
+  dictation from manual typing at the input-event level, so a person who
+  manually pauses mid-thought for longer than the threshold and then
+  keeps typing the *same* sentence will also get the earlier part wiped —
+  a real, accepted tradeoff of this feature, not a bug to chase.
+  `syncInputTracking()` re-syncs `lastInputAt`/`lastInputValue` after every
+  *programmatic* change to `sourceText.value` (clear button, restoring a
+  history entry, swap) — those don't fire a real `input` event, so
+  skipping this would leave the tracking comparing against a stale
+  snapshot from before the change.
 
 ## Versioning
 
@@ -174,25 +197,56 @@
   unreachable. Don't reintroduce a model-download feature without that
   being an explicit, deliberate ask — it's gone on purpose, not a gap.
 
-## Bulgarian is shown romanized
+## Non-Latin scripts show a romanized second line
 
-- `js/transliterate.js`'s `transliterateBulgarian()` converts Bulgarian
-  output from Cyrillic to Latin using the official government "Streamlined
-  System" (what Bulgaria itself uses on road signs/passports) — a pure,
-  offline, deterministic character map, not a network call, so it's fully
-  tested and 100% reliable regardless of the translation source. Applied
-  once, right after either translation path (`js/main.js`'s
-  `runTranslate()`) returns, before both display and saving to history —
-  so history stores the romanized form too, not Cyrillic. Only Bulgarian;
-  don't assume the same character map applies to other Cyrillic-script
-  languages (Russian, Ukrainian, Serbian have their own, different
-  romanization conventions).
+- `js/transliterate.js` exports `transliterateFor(targetLang, text)`,
+  looked up against a small per-language registry (`bg`, `ru`, `el` today)
+  built on a shared `makeTransliterator(map, digraphs)` helper — pure
+  character substitution, no network call, so it's fully deterministic and
+  testable regardless of the translation source. Returns `null` when the
+  language has no scheme (already Latin-script, or just not added yet),
+  which `js/main.js` treats as "don't show a second line" rather than
+  displaying a redundant identical copy.
+- **The native script is never replaced** — `#resultText` always shows the
+  real translation as the provider returned it; `#resultRomanized` is a
+  second, smaller line underneath purely as a reading aid, matching how
+  the real Google Translate app shows both. This used to work differently
+  for Bulgarian specifically (the Cyrillic was converted away entirely
+  before display and before saving to history) — don't reintroduce that;
+  history now stores the native-script `translatedText`, and the romanized
+  form is recomputed on demand every time (live translate and
+  restore-from-history both call `transliterateFor()` fresh) rather than
+  being persisted, so there's one source of truth instead of two fields to
+  keep in sync. Pre-existing history entries saved under the old Bulgarian-
+  only behavior already have Latin text as `translatedText` — restoring
+  one of those calls `transliterateFor('bg', <already-Latin text>)`, which
+  correctly finds nothing to convert and returns `null` (no second line),
+  a harmless one-time quirk for old data, not something to migrate.
+- Bulgarian's map is the official government "Streamlined System" (what
+  Bulgaria itself uses on road signs/passports). Russian and Greek use
+  common simplified phonetic schemes, not an official standard — good
+  enough as a reading aid, not meant to be authoritative. Greek's map
+  needs `digraphs` (μπ→b, ντ→d, γκ→g, τσ→ts, τζ→dz, αυ→av, ευ→ev) checked
+  before falling back to per-character mapping, since those two-letter
+  sequences represent one sound each, not the sum of their parts — a
+  naive per-letter pass would render "μπάλα" as "mpála" instead of the
+  actual "bála". Don't assume Bulgarian's map applies to other Cyrillic
+  languages (Ukrainian, Serbian have their own different conventions) —
+  add a new map (plus digraphs if needed) and a registry entry rather than
+  reusing an existing one for a language it wasn't built for.
 
 ## UI layout
 
 - No app header, no Settings screen — removed entirely to save vertical
   space and simplify the app down to two tabs (Translate, History). The
-  version tag moved to the bottom of History (see Versioning above).
+  version tag moved to the bottom of History (see Versioning above). The
+  one adjustable preference this app has (`#phraseGapInput`, the dictation
+  pause threshold — see Language defaults above) lives right above the
+  version tag in that same "about this app" area at the bottom of
+  History, rather than being reason enough to bring back a whole Settings
+  destination — keep it that way for any future single-value preference
+  too; a *second* one might tip the balance toward a real Settings
+  screen, but one doesn't.
 - The language row is collapsible (`#langToggleBtn` / `#langRow`) for the
   same space reason; state isn't persisted across launches, always starts
   expanded.

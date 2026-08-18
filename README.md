@@ -12,14 +12,25 @@ translation saved automatically to a searchable local history.
   Translation server below). If every server is unreachable, it falls
   back to your own translation history and then a small bundled
   word-for-word dictionary as a last resort (see below).
-- Bulgarian output is shown romanized (Latin script), not Cyrillic.
+- Translations into a non-Latin script (Bulgarian, Russian, Greek so far)
+  show the real native-script result plus a smaller romanized line
+  underneath, so you can read it aloud without needing that language's
+  keyboard or font familiarity — same idea as the real Google Translate
+  app, and it never replaces the actual translation with the romanized
+  version the way an earlier build of this app did for Bulgarian.
+- Dictating with the keyboard's mic types straight into the input box, so
+  without help everything you say in one sitting would pile up into one
+  ever-growing block. After a pause (adjustable in History, default 4s)
+  the next thing you say starts a fresh phrase instead of tacking onto
+  the last one.
 - A small copy icon sits on the translated text — tap it to copy the
   result to your clipboard. The input box has a matching small clear
   (✕) icon in its corner instead of a separate "Clear" text link.
 - Both language dropdowns always show your most recently used languages
   first.
-- Minimal chrome — no header, no Settings screen, and the language row
-  can be collapsed to make more room for reading.
+- Minimal chrome — no header, no Settings screen (just the one pause-
+  duration slider in History), and the language row can be collapsed to
+  make more room for reading.
 - History is stored locally in **IndexedDB** and persists forever on the
   device until you delete it. Deleting a single entry is immediate, no
   confirmation prompt — only "Clear all" (wiping everything at once)
@@ -76,7 +87,8 @@ the app doesn't just fail:
 - `css/styles.css` — dark, mobile-first styling
 - `js/api.js` — translation client: Google, LibreTranslate mirrors, MyMemory
 - `js/db.js` — IndexedDB wrapper for history
-- `js/transliterate.js` — Cyrillic→Latin romanization for Bulgarian
+- `js/transliterate.js` — romanization for non-Latin scripts (Bulgarian,
+  Russian, Greek), shown as a second line under the real translation
 - `js/dictionary.js` — bundled word-for-word dictionary, last resort when
   no server is reachable and there's no matching history entry to replay
 - `js/main.js` — UI wiring: tabs, translate flow, history, recent-language

@@ -286,6 +286,14 @@ button, input, select, textarea {
 .copy-btn svg { width: 16px; height: 16px; fill: var(--text-dim); }
 .copy-btn:active svg { fill: var(--accent); }
 
+.result-romanized {
+  margin: 8px 4px 0;
+  font-size: 16px;
+  color: var(--text-dim);
+}
+
+.result-romanized[hidden] { display: none; }
+
 .translation-note {
   margin: 8px 4px 0;
   font-size: 12px;
@@ -451,12 +459,30 @@ button, input, select, textarea {
 .tab-btn.active { color: var(--accent); }
 .tab-btn.active svg { fill: var(--accent); }
 
+.phrase-gap-setting {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.phrase-gap-setting label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+.phrase-gap-setting input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
 .version-tag {
   text-align: center;
   font-size: 11px;
   color: var(--text-faint);
   letter-spacing: 0.02em;
-  margin: 32px 0 4px;
+  margin: 16px 0 4px;
 }
 
 /* ---------- Toast ---------- */

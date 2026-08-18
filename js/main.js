@@ -1,6 +1,6 @@
 import * as db from './db.js';
 import * as api from './api.js';
-import { transliterateBulgarian } from './transliterate.js';
+import { transliterateFor } from './transliterate.js';
 import { hasDictionary, translateWithDictionary } from './dictionary.js';
 import { APP_VERSION } from './version.js';
 
@@ -11,6 +11,20 @@ import { APP_VERSION } from './version.js';
 const WORD_BOUNDARY_DEBOUNCE_MS = 120;
 const MID_WORD_DEBOUNCE_MS = 450;
 const WORD_BOUNDARY_RE = /[\s.,!?;:\n]$/;
+
+// How long a pause (mainly meant for dictation — see the sourceText
+// 'input' listener) has to be before the next arriving text is treated as
+// a new phrase rather than a continuation. Adjustable via #phraseGapInput
+// in the History view — there's no dedicated Settings screen in this app,
+// so a single inline control lives with the other "about this app" bits
+// rather than becoming a whole new destination.
+const PHRASE_GAP_KEY = 'lt_phrase_gap_ms';
+const DEFAULT_PHRASE_GAP_MS = 4000;
+
+function getPhraseGapMs() {
+  const stored = Number(localStorage.getItem(PHRASE_GAP_KEY));
+  return stored > 0 ? stored : DEFAULT_PHRASE_GAP_MS;
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -28,6 +42,7 @@ const el = {
   resultBlock: $('resultBlock'),
   resultText: $('resultText'),
   copyResultBtn: $('copyResultBtn'),
+  resultRomanized: $('resultRomanized'),
   translationNote: $('translationNote'),
   viewTranslate: $('view-translate'),
   viewHistory: $('view-history'),
@@ -36,6 +51,8 @@ const el = {
   historyNoResults: $('historyNoResults'),
   searchInput: $('searchInput'),
   clearAllBtn: $('clearAllBtn'),
+  phraseGapInput: $('phraseGapInput'),
+  phraseGapValue: $('phraseGapValue'),
   tabBtns: Array.from(document.querySelectorAll('.tab-btn[data-target]')),
   toast: $('toast'),
   versionTag: $('versionTag'),
@@ -199,8 +216,10 @@ el.swapBtn.addEventListener('click', () => {
   const resVal = el.resultText.textContent;
   if (hadResult) {
     el.sourceText.value = resVal;
+    syncInputTracking();
     el.resultText.textContent = srcVal;
     fitResultFontSize(srcVal);
+    el.resultRomanized.hidden = true;
     el.translationNote.hidden = true;
   }
   toggleClearButton();
@@ -228,13 +247,50 @@ function toggleClearButton() {
   el.clearInputBtn.hidden = el.sourceText.value.length === 0;
 }
 
+// Dictation via the iOS keyboard's mic types straight into the focused
+// field, so without this a whole day's worth of separate things you say
+// would just keep piling up into one ever-growing block instead of each
+// becoming its own translation. If enough silence (adjustable in History,
+// `#phraseGapInput`) passes between two keystrokes/dictated chunks, the
+// next arriving text is treated as a brand-new phrase: whatever was
+// already there (already translated by the live-as-you-type flow below,
+// since MID_WORD_DEBOUNCE_MS is far shorter than any reasonable pause
+// setting) gets cleared, keeping only the newly-arrived text. This can't
+// distinguish dictation from manual typing — a manual typist who pauses
+// to think for longer than the threshold and then continues the SAME
+// sentence will also have the earlier part cleared, which is a real
+// tradeoff of this feature, not an edge case to "fix".
+let lastInputAt = Date.now();
+let lastInputValue = '';
+
+// Call after any PROGRAMMATIC change to sourceText.value (restoring a
+// history entry, the clear button, swap) — those don't fire a real
+// 'input' event, so without this the pause-tracking above would compare
+// the next real keystroke/dictated chunk against a stale snapshot from
+// before the change and could mis-fire the phrase-reset logic.
+function syncInputTracking() {
+  lastInputAt = Date.now();
+  lastInputValue = el.sourceText.value;
+}
+
 el.sourceText.addEventListener('input', () => {
+  const now = Date.now();
+  const gap = now - lastInputAt;
+  lastInputAt = now;
+
+  const value = el.sourceText.value;
+  if (gap >= getPhraseGapMs() && lastInputValue && value.startsWith(lastInputValue) && value.length > lastInputValue.length) {
+    el.sourceText.value = value.slice(lastInputValue.length).replace(/^\s+/, '');
+  }
+  lastInputValue = el.sourceText.value;
+
   toggleClearButton();
   scheduleTranslate();
 });
 
 el.clearInputBtn.addEventListener('click', () => {
   el.sourceText.value = '';
+  syncInputTracking();
   toggleClearButton();
   el.sourceText.focus();
   scheduleTranslate();
@@ -313,6 +369,7 @@ async function runTranslate() {
     hideError();
     el.resultBlock.hidden = true;
     el.detectedLabel.hidden = true;
+    el.resultRomanized.hidden = true;
     el.translationNote.hidden = true;
     return;
   }
@@ -359,13 +416,16 @@ async function runTranslate() {
     }
     if (token !== translateToken) return; // superseded by newer input/language change
 
-    // Bulgarian is shown romanized, not in Cyrillic — readable without
-    // needing a Bulgarian keyboard/font familiarity.
-    if (target === 'bg') translatedText = transliterateBulgarian(translatedText);
-
     el.resultText.textContent = translatedText;
     fitResultFontSize(translatedText);
     el.resultBlock.hidden = false;
+    // Non-Latin scripts (Bulgarian, Russian, Greek, ...) show a second,
+    // smaller romanized line underneath rather than replacing the native
+    // script — readable without a matching keyboard/font familiarity,
+    // without hiding what the translation actually says.
+    const romanized = transliterateFor(target, translatedText);
+    el.resultRomanized.textContent = romanized || '';
+    el.resultRomanized.hidden = !romanized;
     const note = describeTranslationSource(usedDictionary, provider, googleError);
     el.translationNote.textContent = note || '';
     el.translationNote.hidden = !note;
@@ -507,10 +567,14 @@ function restoreEntry(entry) {
   refreshLanguageOptions(languages);
 
   el.sourceText.value = entry.sourceText;
+  syncInputTracking();
   toggleClearButton();
   el.resultText.textContent = entry.translatedText;
   fitResultFontSize(entry.translatedText);
   el.resultBlock.hidden = false;
+  const romanized = transliterateFor(entry.targetLang, entry.translatedText);
+  el.resultRomanized.textContent = romanized || '';
+  el.resultRomanized.hidden = !romanized;
   const note = describeTranslationSource(Boolean(entry.usedDictionary), entry.provider || null, entry.googleError || null);
   el.translationNote.textContent = note || '';
   el.translationNote.hidden = !note;
@@ -552,6 +616,17 @@ function initVersionTag() {
   if (el.versionTag) el.versionTag.textContent = `v${APP_VERSION}`;
 }
 
+function initPhraseGapControl() {
+  const seconds = getPhraseGapMs() / 1000;
+  el.phraseGapInput.value = String(seconds);
+  el.phraseGapValue.textContent = seconds.toFixed(1);
+  el.phraseGapInput.addEventListener('input', () => {
+    const value = Number(el.phraseGapInput.value);
+    el.phraseGapValue.textContent = value.toFixed(1);
+    localStorage.setItem(PHRASE_GAP_KEY, String(Math.round(value * 1000)));
+  });
+}
+
 // Keeps the installed app in step with whatever is on GitHub: any time a
 // new service worker takes over (because sw.js or a cached asset changed),
 // reload once so the tab is running the latest deployed code instead of a
@@ -591,6 +666,7 @@ function registerServiceWorker() {
 
 async function init() {
   initVersionTag();
+  initPhraseGapControl();
 
   if ('storage' in navigator && navigator.storage.persist) {
     navigator.storage.persist().catch(() => {});

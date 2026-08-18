@@ -1,4 +1,6 @@
-/* Translate History — mobile-first dark UI, tuned for iPhone Safari */
+/* Translate History — mobile-first UI, tuned for iPhone Safari. Dark by
+   default; :root[data-theme="light"] below overrides for light mode
+   (js/main.js toggles the attribute and persists the choice). */
 
 :root {
   --bg: #0f172a;
@@ -13,12 +15,42 @@
   --accent-contrast: #04201c;
   --danger: #f87171;
   --danger-strong: #ef4444;
+  --led-green: #4ade80;
+  --overlay-subtle: rgba(255, 255, 255, 0.06);
+  --error-bg: rgba(248, 113, 113, 0.12);
+  --error-border: rgba(248, 113, 113, 0.35);
+  --error-text: #fecaca;
+  --tabbar-bg: rgba(15, 23, 42, 0.92);
+  --toast-bg: #1e293b;
+  --toast-text: #f1f5f9;
   --radius-lg: 20px;
   --radius-md: 14px;
   --radius-sm: 10px;
   --tabbar-height: 76px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+:root[data-theme="light"] {
+  --bg: #f8fafc;
+  --bg-elevated: #ffffff;
+  --bg-input: #f1f5f9;
+  --border: #dbe2ea;
+  --text: #0f172a;
+  --text-dim: #475569;
+  --text-faint: #94a3b8;
+  --accent: #0d9488;
+  --accent-strong: #0f766e;
+  --accent-contrast: #ffffff;
+  --danger: #dc2626;
+  --danger-strong: #b91c1c;
+  --overlay-subtle: rgba(15, 23, 42, 0.06);
+  --error-bg: rgba(220, 38, 38, 0.08);
+  --error-border: rgba(220, 38, 38, 0.3);
+  --error-text: #b91c1c;
+  --tabbar-bg: rgba(248, 250, 252, 0.92);
+  --toast-bg: #0f172a;
+  --toast-text: #f1f5f9;
 }
 
 * { box-sizing: border-box; }
@@ -176,7 +208,7 @@ button, input, select, textarea {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--overlay-subtle);
   border: none;
   border-radius: 50%;
   cursor: pointer;
@@ -192,6 +224,24 @@ button, input, select, textarea {
   gap: 10px;
   min-height: 28px;
   padding: 6px 4px 0;
+}
+
+/* Red while the phrase-gap pause hasn't elapsed yet (more dictation now
+   would extend the current phrase); green once it has, or whenever the
+   box is empty — see js/main.js's updatePhraseLed(). */
+.phrase-led {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--danger);
+  box-shadow: 0 0 6px 0 rgba(248, 113, 113, 0.6);
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.phrase-led.is-ready {
+  background: var(--led-green);
+  box-shadow: 0 0 6px 0 rgba(74, 222, 128, 0.6);
 }
 
 .detected-label {
@@ -239,9 +289,9 @@ button, input, select, textarea {
   margin-top: 12px;
   padding: 12px 14px;
   border-radius: var(--radius-md);
-  background: rgba(248, 113, 113, 0.12);
-  border: 1px solid rgba(248, 113, 113, 0.35);
-  color: #fecaca;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  color: var(--error-text);
   font-size: 14px;
   line-height: 1.4;
 }
@@ -277,7 +327,7 @@ button, input, select, textarea {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--overlay-subtle);
   border: none;
   border-radius: 50%;
   cursor: pointer;
@@ -431,7 +481,7 @@ button, input, select, textarea {
   bottom: 0;
   display: flex;
   border-top: 1px solid var(--border);
-  background: rgba(15, 23, 42, 0.92);
+  background: var(--tabbar-bg);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   padding-bottom: var(--safe-bottom);
@@ -459,22 +509,54 @@ button, input, select, textarea {
 .tab-btn.active { color: var(--accent); }
 .tab-btn.active svg { fill: var(--accent); }
 
-.phrase-gap-setting {
-  margin-top: 32px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
+/* ---------- Settings ---------- */
+
+.settings-heading {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 4px 0 20px;
 }
 
-.phrase-gap-setting label {
+.settings-section {
+  margin-bottom: 28px;
+}
+
+.settings-label {
   display: block;
   font-size: 13px;
   color: var(--text-dim);
   margin-bottom: 10px;
 }
 
-.phrase-gap-setting input[type="range"] {
+.settings-section input[type="range"] {
   width: 100%;
   accent-color: var(--accent);
+}
+
+.theme-toggle {
+  display: flex;
+  gap: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 4px;
+}
+
+.theme-btn {
+  flex: 1;
+  min-height: 40px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.theme-btn.active {
+  background: var(--accent);
+  color: var(--accent-contrast);
 }
 
 .version-tag {
@@ -482,7 +564,7 @@ button, input, select, textarea {
   font-size: 11px;
   color: var(--text-faint);
   letter-spacing: 0.02em;
-  margin: 16px 0 4px;
+  margin: 32px 0 4px;
 }
 
 /* ---------- Toast ---------- */
@@ -492,9 +574,9 @@ button, input, select, textarea {
   left: 50%;
   bottom: calc(var(--tabbar-height) + var(--safe-bottom) + 16px);
   transform: translateX(-50%);
-  background: #1e293b;
+  background: var(--toast-bg);
   border: 1px solid var(--border);
-  color: var(--text);
+  color: var(--toast-text);
   padding: 12px 18px;
   border-radius: 999px;
   font-size: 14px;

@@ -11,8 +11,8 @@
   word-by-word, not waiting for the user to stop typing entirely.
 - `sourceText`'s 'input' listener also tracks the gap since the previous
   keystroke/dictated chunk (`lastInputAt`/`lastInputValue`). If that gap
-  is at least `getPhraseGapMs()` (adjustable via `#phraseGapInput` in the
-  History view, default 4s, `lt_phrase_gap_ms` in `localStorage`) AND the
+  is at least `getPhraseGapMs()` (adjustable via `#phraseGapInput` in
+  Settings, default 4s, `lt_phrase_gap_ms` in `localStorage`) AND the
   new value is the old value with more text appended, the old text is
   dropped and only the newly-arrived part is kept. This exists for
   dictation specifically: the iOS keyboard's mic types straight into the
@@ -32,6 +32,14 @@
   history entry, swap) — those don't fire a real `input` event, so
   skipping this would leave the tracking comparing against a stale
   snapshot from before the change.
+- `#phraseLed` (below the source textarea, `updatePhraseLed()` in
+  `js/main.js`) visualizes that same pause window: red while the box has
+  text and less than `getPhraseGapMs()` has elapsed since the last
+  keystroke/dictated chunk (more speech now would extend the current
+  phrase), green once it's elapsed or whenever the box is empty. Polled
+  on a `setInterval(250ms)` rather than only from the `input` handler,
+  since the red→green transition happens passively as time passes with
+  no DOM event of its own — an interval is the only way to notice it.
 
 ## Versioning
 
@@ -40,9 +48,8 @@
   ES modules from a classic script scope) — **keep both in sync**.
 - Bump the patch number on every push to GitHub (e.g. `1.0.1` → `1.0.2`).
   Bump minor/major only for deliberately larger changes, at your judgment.
-- There's no Settings screen — the version is shown subtly at the bottom
-  of the History view instead (`#versionTag` in `index.html`, below the
-  history list/empty-state), not anywhere prominent in the main UI.
+- Shown subtly at the bottom of the Settings tab (`#versionTag`), not
+  anywhere prominent in the main UI.
 - After actually pushing, end the reply's very last line with
   `Pushed to GitHub vX.X.X` (nothing after it) so it's visible without
   scrolling up. Only write it once the push has actually succeeded.
@@ -156,10 +163,11 @@
   only if a chunk's original text can't be located verbatim in the
   source (not expected in practice, but better than jamming words
   together with zero boundary).
-- There is no Settings screen, so no way to pin a custom server manually
-  — the app only ever picks automatically between the providers above. If
-  self-hosting support is ever needed again, that's a feature to
-  reintroduce deliberately, not a removed-by-accident gap.
+- The Settings tab has no control to pin a custom server manually — the
+  app only ever picks automatically between the providers above. If
+  self-hosting support is ever needed, that's a feature to add
+  deliberately (a server-URL field in Settings), not something implied
+  by Settings existing now.
 - Before falling all the way to the bundled dictionary, `runTranslate()`'s
   `catch` around the online call first tries `findHistoryMatch()` — an
   exact (trimmed, case-insensitive) lookup against this device's own
@@ -237,16 +245,29 @@
 
 ## UI layout
 
-- No app header, no Settings screen — removed entirely to save vertical
-  space and simplify the app down to two tabs (Translate, History). The
-  version tag moved to the bottom of History (see Versioning above). The
-  one adjustable preference this app has (`#phraseGapInput`, the dictation
-  pause threshold — see Language defaults above) lives right above the
-  version tag in that same "about this app" area at the bottom of
-  History, rather than being reason enough to bring back a whole Settings
-  destination — keep it that way for any future single-value preference
-  too; a *second* one might tip the balance toward a real Settings
-  screen, but one doesn't.
+- No app header — removed to save vertical space. There IS a Settings
+  tab (three tabs total: Translate, History, Settings, gear icon,
+  `#view-settings`) — this was deliberately re-added by request after a
+  long stretch of this project explicitly avoiding one; don't read old
+  history/commit messages about "no Settings screen" as still current.
+  It holds the theme toggle, the dictation pause-threshold slider
+  (`#phraseGapInput` — see Language defaults above), and the version tag
+  (see Versioning above). Keep it minimal — this isn't an invitation to
+  start accumulating every future preference into a sprawling
+  Settings page just because the destination now exists.
+- Light/dark theme (`applyTheme()`/`initTheme()` in `js/main.js`,
+  `lt_theme` in `localStorage`, default dark) is applied via
+  `data-theme="light"|"dark"` on `<html>`, with the light palette defined
+  under `:root[data-theme="light"]` in `css/styles.css` — every color in
+  the base `:root` needs a real value there too (or the light override
+  needs its own), since anything left as a hardcoded hex/rgba outside the
+  variable system (as several colors used to be — `.clear-btn`'s overlay,
+  the error banner, the tab bar backdrop, the toast) silently stays
+  dark-only regardless of the toggle. index.html's inline `<script>` in
+  `<head>` (before the stylesheet/body) sets the same attribute from
+  `localStorage` synchronously on load — without it there'd be a flash of
+  the wrong theme on every launch while `js/main.js` (a module script,
+  deferred) loads and runs.
 - The language row is collapsible (`#langToggleBtn` / `#langRow`) for the
   same space reason; state isn't persisted across launches, always starts
   expanded.

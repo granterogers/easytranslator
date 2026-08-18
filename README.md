@@ -20,22 +20,24 @@ translation saved automatically to a searchable local history.
   version the way an earlier build of this app did for Bulgarian.
 - Dictating with the keyboard's mic types straight into the input box, so
   without help everything you say in one sitting would pile up into one
-  ever-growing block. After a pause (adjustable in History, default 4s)
+  ever-growing block. After a pause (adjustable in Settings, default 4s)
   the next thing you say starts a fresh phrase instead of tacking onto
-  the last one.
+  the last one — a small red/green dot under the input box shows whether
+  you're still within that pause window (red) or a new phrase is ready
+  to start (green, also shown whenever the box is empty).
 - A small copy icon sits on the translated text — tap it to copy the
   result to your clipboard. The input box has a matching small clear
   (✕) icon in its corner instead of a separate "Clear" text link.
 - Both language dropdowns always show your most recently used languages
   first.
-- Minimal chrome — no header, no Settings screen (just the one pause-
-  duration slider in History), and the language row can be collapsed to
+- Minimal chrome — no header, and the language row can be collapsed to
   make more room for reading.
 - History is stored locally in **IndexedDB** and persists forever on the
   device until you delete it. Deleting a single entry is immediate, no
   confirmation prompt — only "Clear all" (wiping everything at once)
   still asks first.
-- Installable as a PWA, optimized for iPhone Safari, dark mode only.
+- Light and dark mode, switchable in Settings (defaults to dark).
+- Installable as a PWA, optimized for iPhone Safari.
 
 ## Running it
 
@@ -58,8 +60,8 @@ libraries use — not the official paid Cloud API, which would need a
 billing-linked key this app has nowhere safe to hide); then a couple of
 public LibreTranslate mirrors; then [MyMemory](https://mymemory.translated.net/),
 a separate independent public translation API. Whichever one actually
-answers is remembered so it's tried first next time — there's no Settings
-screen to pin a specific one manually, it's fully automatic.
+answers is remembered so it's tried first next time — there's no way to
+pin a specific one manually, it's fully automatic.
 
 ## Offline fallbacks (last resort)
 
@@ -81,10 +83,19 @@ the app doesn't just fail:
    results are labeled "approximate, not a full translation" rather
    than presented as a real translation.
 
+## Settings
+
+The Settings tab (gear icon) holds the few things that are actually
+adjustable: light/dark appearance, the dictation pause-duration slider,
+and the app version at the bottom. Kept deliberately small — this isn't
+meant to grow into a catch-all preferences page.
+
 ## Project layout
 
-- `index.html` — app shell and markup
-- `css/styles.css` — dark, mobile-first styling
+- `index.html` — app shell and markup; also has a tiny inline script in
+  `<head>` that applies the saved light/dark theme before first paint
+- `css/styles.css` — mobile-first styling, light and dark themes via
+  CSS variables (`:root[data-theme="light"]`)
 - `js/api.js` — translation client: Google, LibreTranslate mirrors, MyMemory
 - `js/db.js` — IndexedDB wrapper for history
 - `js/transliterate.js` — romanization for non-Latin scripts (Bulgarian,

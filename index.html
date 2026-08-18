@@ -7,7 +7,13 @@
 <meta name="description" content="Fast, private translation with automatic local history. No accounts, no backend, works offline for your saved history.">
 
 <meta name="theme-color" content="#0f172a">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="dark light">
+<script>
+  try {
+    var t = localStorage.getItem('lt_theme');
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+  } catch (e) {}
+</script>
 
 <!-- iOS PWA / Safari home screen support -->
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -48,6 +54,7 @@
           </button>
         </div>
         <div class="field-meta">
+          <span id="phraseLed" class="phrase-led is-ready" aria-hidden="true"></span>
           <span id="statusLabel" class="status-label" hidden>
             <span class="mini-spinner" aria-hidden="true"></span>
             <span>Translating…</span>
@@ -87,8 +94,23 @@
       <p id="historyEmpty" class="empty-state" hidden>No translations yet.<br>Your history will appear here.</p>
       <p id="historyNoResults" class="empty-state" hidden>No matches found.</p>
 
-      <div class="phrase-gap-setting">
-        <label for="phraseGapInput">
+    </section>
+
+    <!-- SETTINGS VIEW -->
+    <section id="view-settings" class="view" data-view="settings" hidden>
+
+      <h2 class="settings-heading">Settings</h2>
+
+      <div class="settings-section">
+        <label class="settings-label">Appearance</label>
+        <div class="theme-toggle">
+          <button id="themeDarkBtn" class="theme-btn" type="button">Dark</button>
+          <button id="themeLightBtn" class="theme-btn" type="button">Light</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <label for="phraseGapInput" class="settings-label">
           Dictation: start a new phrase after a pause of
           <span id="phraseGapValue">4.0</span>s
         </label>
@@ -109,6 +131,10 @@
     <button class="tab-btn" data-target="history" role="tab" aria-selected="false" type="button">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 1 1 2.05 4.95l-1.42 1.42A9 9 0 1 0 13 3zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
       <span>History</span>
+    </button>
+    <button class="tab-btn" data-target="settings" role="tab" aria-selected="false" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.5.5 0 0 0 .12-.65l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.43h-3.84a.5.5 0 0 0-.5.43l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.66 8.87a.5.5 0 0 0 .12.65l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.5.5 0 0 0-.12.65l1.92 3.32c.13.22.39.3.6.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54a.5.5 0 0 0 .5.43h3.84a.5.5 0 0 0 .5-.43l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.65l-2.03-1.58zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+      <span>Settings</span>
     </button>
   </nav>
 

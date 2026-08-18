@@ -15,11 +15,11 @@ const WORD_BOUNDARY_RE = /[\s.,!?;:\n]$/;
 // How long a pause (mainly meant for dictation — see the sourceText
 // 'input' listener) has to be before the next arriving text is treated as
 // a new phrase rather than a continuation. Adjustable via #phraseGapInput
-// in the History view — there's no dedicated Settings screen in this app,
-// so a single inline control lives with the other "about this app" bits
-// rather than becoming a whole new destination.
+// in the Settings tab.
 const PHRASE_GAP_KEY = 'lt_phrase_gap_ms';
 const DEFAULT_PHRASE_GAP_MS = 4000;
+
+const THEME_KEY = 'lt_theme';
 
 function getPhraseGapMs() {
   const stored = Number(localStorage.getItem(PHRASE_GAP_KEY));
@@ -35,6 +35,7 @@ const el = {
   targetLang: $('targetLang'),
   swapBtn: $('swapBtn'),
   sourceText: $('sourceText'),
+  phraseLed: $('phraseLed'),
   statusLabel: $('statusLabel'),
   detectedLabel: $('detectedLabel'),
   clearInputBtn: $('clearInputBtn'),
@@ -46,6 +47,7 @@ const el = {
   translationNote: $('translationNote'),
   viewTranslate: $('view-translate'),
   viewHistory: $('view-history'),
+  viewSettings: $('view-settings'),
   historyList: $('historyList'),
   historyEmpty: $('historyEmpty'),
   historyNoResults: $('historyNoResults'),
@@ -53,6 +55,8 @@ const el = {
   clearAllBtn: $('clearAllBtn'),
   phraseGapInput: $('phraseGapInput'),
   phraseGapValue: $('phraseGapValue'),
+  themeDarkBtn: $('themeDarkBtn'),
+  themeLightBtn: $('themeLightBtn'),
   tabBtns: Array.from(document.querySelectorAll('.tab-btn[data-target]')),
   toast: $('toast'),
   versionTag: $('versionTag'),
@@ -86,6 +90,7 @@ function activateTab(target) {
   });
   el.viewTranslate.hidden = target !== 'translate';
   el.viewHistory.hidden = target !== 'history';
+  el.viewSettings.hidden = target !== 'settings';
   el.views.scrollTop = 0;
 }
 
@@ -250,18 +255,31 @@ function toggleClearButton() {
 // Dictation via the iOS keyboard's mic types straight into the focused
 // field, so without this a whole day's worth of separate things you say
 // would just keep piling up into one ever-growing block instead of each
-// becoming its own translation. If enough silence (adjustable in History,
-// `#phraseGapInput`) passes between two keystrokes/dictated chunks, the
-// next arriving text is treated as a brand-new phrase: whatever was
-// already there (already translated by the live-as-you-type flow below,
-// since MID_WORD_DEBOUNCE_MS is far shorter than any reasonable pause
-// setting) gets cleared, keeping only the newly-arrived text. This can't
-// distinguish dictation from manual typing — a manual typist who pauses
-// to think for longer than the threshold and then continues the SAME
-// sentence will also have the earlier part cleared, which is a real
-// tradeoff of this feature, not an edge case to "fix".
+// becoming its own translation. If enough silence (adjustable via
+// #phraseGapInput in Settings) passes between two keystrokes/dictated
+// chunks, the next arriving text is treated as a brand-new phrase:
+// whatever was already there (already translated by the live-as-you-type
+// flow below, since MID_WORD_DEBOUNCE_MS is far shorter than any
+// reasonable pause setting) gets cleared, keeping only the newly-arrived
+// text. This can't distinguish dictation from manual typing — a manual
+// typist who pauses to think for longer than the threshold and then
+// continues the SAME sentence will also have the earlier part cleared,
+// which is a real tradeoff of this feature, not an edge case to "fix".
 let lastInputAt = Date.now();
 let lastInputValue = '';
+
+// Red while the box has text and the pause threshold above hasn't
+// elapsed since the last keystroke/dictated chunk (more speech now would
+// extend the current phrase); green once it has, or whenever the box is
+// empty. Polled on an interval rather than only on 'input' because the
+// red→green transition happens passively as time passes, with no event
+// of its own to react to.
+function updatePhraseLed() {
+  const hasText = el.sourceText.value.trim().length > 0;
+  const ready = !hasText || (Date.now() - lastInputAt) >= getPhraseGapMs();
+  el.phraseLed.classList.toggle('is-ready', ready);
+}
+setInterval(updatePhraseLed, 250);
 
 // Call after any PROGRAMMATIC change to sourceText.value (restoring a
 // history entry, the clear button, swap) — those don't fire a real
@@ -271,6 +289,7 @@ let lastInputValue = '';
 function syncInputTracking() {
   lastInputAt = Date.now();
   lastInputValue = el.sourceText.value;
+  updatePhraseLed();
 }
 
 el.sourceText.addEventListener('input', () => {
@@ -284,6 +303,7 @@ el.sourceText.addEventListener('input', () => {
   }
   lastInputValue = el.sourceText.value;
 
+  updatePhraseLed();
   toggleClearButton();
   scheduleTranslate();
 });
@@ -627,6 +647,26 @@ function initPhraseGapControl() {
   });
 }
 
+// Applied as early as possible (see the inline <script> in index.html's
+// <head>, which sets the same attribute before first paint to avoid a
+// flash of the wrong theme) — this just keeps it in sync afterward and
+// handles the toggle buttons.
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem(THEME_KEY, theme);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', theme === 'light' ? '#f8fafc' : '#0f172a');
+  el.themeDarkBtn.classList.toggle('active', theme === 'dark');
+  el.themeLightBtn.classList.toggle('active', theme === 'light');
+}
+
+function initTheme() {
+  const stored = localStorage.getItem(THEME_KEY);
+  applyTheme(stored === 'light' ? 'light' : 'dark');
+  el.themeDarkBtn.addEventListener('click', () => applyTheme('dark'));
+  el.themeLightBtn.addEventListener('click', () => applyTheme('light'));
+}
+
 // Keeps the installed app in step with whatever is on GitHub: any time a
 // new service worker takes over (because sw.js or a cached asset changed),
 // reload once so the tab is running the latest deployed code instead of a
@@ -667,6 +707,7 @@ function registerServiceWorker() {
 async function init() {
   initVersionTag();
   initPhraseGapControl();
+  initTheme();
 
   if ('storage' in navigator && navigator.storage.persist) {
     navigator.storage.persist().catch(() => {});
@@ -684,6 +725,7 @@ async function init() {
   renderHistory();
 
   toggleClearButton();
+  updatePhraseLed();
 
   registerServiceWorker();
 }

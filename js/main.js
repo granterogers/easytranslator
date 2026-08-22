@@ -266,35 +266,43 @@ function toggleClearButton() {
 // mid-insertion, a silently-reset pause clock, an exact-text-match that
 // broke on iOS's own retroactive punctuation) all came from mutating the
 // field reactively, at or near the moment new text was actively arriving.
-// A later version tried clearing the box outright the instant the pause
-// threshold elapsed — safe from the stall risk, but it threw away the
+// A later version cleared the box outright the instant the pause
+// threshold elapsed instead — no stalls reported, but it destroyed the
 // just-completed translation from view even when the user had no
-// intention of saying anything else, since "idle" isn't the same thing
-// as "about to start a new phrase."
-// This version: once idle, SELECT (not clear) the existing text — see
-// the `ready && hasText` branch in updatePhraseLed() below, which runs
-// on a plain polling interval, not in response to any input event, so
-// (like the clear-outright version) it can only ever fire during
-// confirmed silence, never while iOS is actively inserting dictated
-// text. The old phrase stays fully visible (just highlighted) for as
-// long as nothing else happens. If something new is then typed or
-// dictated, the browser's own native "typing replaces the current
-// selection" behavior swaps it out in a single atomic edit — no JS of
-// ours ever mutates sourceText.value in reaction to new text, so
-// there's nothing left to race against an in-progress dictation
-// insertion, and no concatenated old+new state ever exists even
-// momentarily. This can't distinguish dictation from manual typing — a
-// manual typist who pauses to think for longer than the threshold will
-// also come back to the old text pre-selected, ready to be typed over,
-// which is a real tradeoff of this feature, not an edge case to "fix".
+// intention of saying anything else. The version after THAT tried
+// SELECTING (not clearing) the old text on the same safe idle-only
+// timing, so it would stay visible until typed over — but a real user
+// then reported dictation sticking again on the second or third attempt.
+// Of everything tried, only "clear the value outright, during confirmed
+// idle" has never been reported to stall dictation — select() itself
+// seems to be what iOS didn't like, plausibly because selecting text
+// triggers its own callout-menu/predictive-text handling that a plain
+// value change doesn't. So this version goes back to clearing outright
+// (see the `ready && hasText` branch in updatePhraseLed() below, which
+// runs on a plain polling interval, not in response to any input event,
+// so it can only ever fire during confirmed silence, never while iOS is
+// actively inserting dictated text) — but deliberately does NOT call
+// scheduleTranslate() when it fires, so the just-shown translation
+// result stays on screen instead of being hidden by runTranslate()'s
+// empty-text path. The INPUT box itself does go blank right away — that
+// part of the earlier complaint is a deliberate, accepted tradeoff now,
+// since every attempt to keep the input box's old text on-screen path
+// (selecting it, or reactively stripping it after new text arrived) has
+// caused a real stability regression on actual hardware, and a box that
+// clears a few seconds after you stop talking is a much smaller problem
+// than dictation hanging. The already-completed phrase is already saved
+// to history by the live-translate flow by the time the pause is
+// detected, since `MID_WORD_DEBOUNCE_MS` is far shorter than any sane
+// pause setting — this only affects what's left sitting in the input
+// box, not what already got saved or the translation still shown below
+// it. There's no way to distinguish dictation from manual typing at the
+// input-event level, so a person who manually pauses mid-thought for
+// longer than the threshold will also come back to an emptied box — a
+// real, accepted tradeoff of this feature, not a bug to chase. If this
+// still causes any trouble, the "Off" position below is a guaranteed
+// escape hatch.
 let lastInputAt = Date.now();
 let lastInputValue = '';
-
-// Whether the current idle period has already had its one-time
-// select-all applied — checked so updatePhraseLed()'s 250ms poll doesn't
-// keep re-selecting on every tick (which would fight a manual tap/cursor
-// reposition made while idle). Reset whenever real new input arrives.
-let phraseSelected = false;
 
 // Red while the box has text and the pause threshold above hasn't
 // elapsed since the last keystroke/dictated chunk (more speech now would
@@ -303,8 +311,7 @@ let phraseSelected = false;
 // Polled on an interval rather than only on 'input' because the
 // red→green transition happens passively as time passes, with no event
 // of its own to react to — and that same passive polling is what makes
-// it safe to also perform the actual select-for-replacement here (see
-// above).
+// it safe to also perform the actual clear here (see above).
 function updatePhraseLed() {
   const disabled = !Number.isFinite(getPhraseGapMs());
   el.phraseLed.hidden = disabled;
@@ -313,22 +320,29 @@ function updatePhraseLed() {
   const ready = !hasText || (Date.now() - lastInputAt) >= getPhraseGapMs();
   el.phraseLed.classList.toggle('is-ready', ready);
 
-  if (ready && hasText && !phraseSelected) {
-    el.sourceText.select();
-    phraseSelected = true;
+  if (ready && hasText) {
+    el.sourceText.value = '';
+    syncInputTracking();
+    toggleClearButton();
+    // Deliberately NOT calling scheduleTranslate() here — that would
+    // immediately hide the just-shown translation via runTranslate()'s
+    // empty-text path. The whole point of this auto-clear is to make
+    // room in the INPUT box for a new phrase; what was just translated
+    // stays visible below it until real new text actually arrives to
+    // replace it.
   }
 }
 setInterval(updatePhraseLed, 250);
 
 // Call after any PROGRAMMATIC change to sourceText.value (restoring a
-// history entry, the clear button, swap) — those don't fire a real
-// 'input' event, so without this the pause-tracking above would compare
-// the next real keystroke/dictated chunk against a stale snapshot from
-// before the change and could mis-fire the phrase-reset logic.
+// history entry, the clear button, swap, the auto-reset above) — those
+// don't fire a real 'input' event, so without this the pause-tracking
+// above would compare the next real keystroke/dictated chunk against a
+// stale snapshot from before the change and could mis-fire the
+// phrase-reset logic.
 function syncInputTracking() {
   lastInputAt = Date.now();
   lastInputValue = el.sourceText.value;
-  phraseSelected = false;
 }
 
 el.sourceText.addEventListener('input', () => {
@@ -344,7 +358,6 @@ el.sourceText.addEventListener('input', () => {
 
   lastInputAt = Date.now();
   lastInputValue = value;
-  phraseSelected = false;
 
   updatePhraseLed();
   toggleClearButton();

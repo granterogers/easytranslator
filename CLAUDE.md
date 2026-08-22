@@ -26,65 +26,64 @@
   for sentence-ending punctuation broke an exact-text-match the strip
   logic depended on. The fourth attempt swung the other way and cleared
   `sourceText.value` proactively the instant the pause elapsed, on a
-  polling interval rather than in reaction to input — safe from the
-  stall risk, but wrong in a different way: it threw away the
-  just-completed translation from view the moment the pause elapsed,
-  whether or not the user was about to say anything else. "Idle" isn't
-  the same thing as "starting a new phrase," and only the second one
-  should trigger a reset.
-  The current design (`updatePhraseLed()` in `js/main.js`) resolves this
-  by not writing to `sourceText.value` *at all* in response to dictation.
-  Once `getPhraseGapMs()` of silence has elapsed (adjustable via
-  `#phraseGapInput` in Settings, default 4s, `lt_phrase_gap_ms` in
-  `localStorage`), it calls `el.sourceText.select()` — selecting, not
-  clearing, the existing text, so the just-completed phrase (and its
-  translation) stays fully visible, just highlighted, for as long as
-  nothing else happens. This still runs on the same `setInterval(250ms)`
-  poll that drives the LED below, not in response to any `input` event,
-  so — like the clear-outright version — it can only ever fire during
-  confirmed silence, never while iOS is actively inserting dictated text.
-  If something new is then typed or dictated, the **browser's own
-  native "typing replaces the current selection" behavior** swaps the
-  old text out in a single atomic edit — no code in this app ever writes
-  `sourceText.value` in reaction to new text arriving, so there's nothing
-  left to race against an in-progress dictation insertion, and no
-  concatenated old+new state ever exists even momentarily (verified with
-  Playwright's real `keyboard.type()`, which drives actual browser text
-  editing rather than a synthetic `.value` assignment — this can't
-  independently confirm iOS dictation specifically respects an existing
-  selection the same way typing does, since that's not something this
-  sandbox can test, but it's the same fundamental `contenteditable`/
-  `<textarea>` behavior any text-replace-on-selection relies on).
-  `phraseSelected` (a one-time-per-idle-period flag, reset whenever real
-  new input arrives) keeps the 250ms poll from re-selecting on every
-  tick — otherwise it would fight a manual tap/cursor reposition made
-  while the box is sitting idle. The already-completed phrase is already
-  saved to history by the live-translate flow by the time the pause is
-  detected, since `MID_WORD_DEBOUNCE_MS` is far shorter than any sane
-  pause setting — this only affects what's left sitting in the input
-  box, not what already got saved. There's no way to distinguish
-  dictation from manual typing at the input-event level, so a person who
-  manually pauses mid-thought for longer than the threshold will also
-  come back to the old text pre-selected, ready to be typed over — a
-  real, accepted tradeoff of this feature, not a bug to chase.
+  polling interval rather than in reaction to input — no stalls reported
+  with that approach, but it threw away the just-completed translation
+  from view the moment the pause elapsed, whether or not the user was
+  about to say anything else, so the very next attempt swapped the clear
+  for `el.sourceText.select()` on that same safe timing, so the old
+  phrase would stay visible (just highlighted) until typed over via the
+  browser's native replace-a-selection behavior. That seemed like a
+  clean solution, but a real user then reported dictation sticking again
+  on the second or third attempt — so `.select()` itself, not just
+  `.value` mutation, turns out to be something iOS's dictation engine
+  doesn't handle well, plausibly because selecting text triggers its own
+  callout-menu/predictive-text handling that a plain value change
+  doesn't.
+  Of every mutation this project has tried, only "clear `sourceText.value`
+  outright, during confirmed idle" has never been reported to cause a
+  stall — so that's what the current design (`updatePhraseLed()` in
+  `js/main.js`) does: once `getPhraseGapMs()` of silence has elapsed
+  (adjustable via `#phraseGapInput` in Settings, default 4s,
+  `lt_phrase_gap_ms` in `localStorage`), it clears `sourceText.value`.
+  This runs on the same `setInterval(250ms)` poll that drives the LED
+  below, not in response to any `input` event, so it can only ever fire
+  during confirmed silence, never while iOS is actively inserting
+  dictated text. Deliberately does **not** call `scheduleTranslate()`
+  when it fires — that would immediately hide the just-shown translation
+  via `runTranslate()`'s empty-text path. The INPUT box does go blank
+  right away (an earlier version tried to avoid this, see above), but
+  the translation result itself stays on screen until real new text
+  actually arrives to replace it — a deliberate compromise, since every
+  attempt at keeping the *input box's* old text visible has caused a
+  real stability regression on actual hardware, and a box that clears a
+  few seconds after you stop talking is a much smaller problem than
+  dictation hanging. The already-completed phrase is already saved to
+  history by the live-translate flow by the time the pause is detected,
+  since `MID_WORD_DEBOUNCE_MS` is far shorter than any sane pause
+  setting. There's no way to distinguish dictation from manual typing at
+  the input-event level, so a person who manually pauses mid-thought for
+  longer than the threshold will also come back to an emptied box — a
+  real, accepted tradeoff of this feature, not a bug to chase. If this
+  still causes trouble, the "Off" position below is a guaranteed escape
+  hatch.
 - The `input` listener bails immediately if `el.sourceText.value` didn't
   actually change (`value === lastInputValue`), before touching
   `lastInputAt` at all — iOS dictation has been observed firing `input`
   events with no real value change, which would otherwise reset the
   pause clock right as a real chunk arrives and make that chunk's own
   measured gap look too small. `syncInputTracking()` re-syncs
-  `lastInputAt`/`lastInputValue` (and clears `phraseSelected`) after
-  every *programmatic* change to `sourceText.value` (clear button,
-  restoring a history entry, swap) — those don't fire a real `input`
-  event, so skipping this would leave the tracking comparing against a
-  stale snapshot from before the change.
+  `lastInputAt`/`lastInputValue` after every *programmatic* change to
+  `sourceText.value` (clear button, restoring a history entry, swap, the
+  auto-reset above) — those don't fire a real `input` event, so skipping
+  this would leave the tracking comparing against a stale snapshot from
+  before the change.
 - As a guaranteed fallback in case the design above still isn't enough —
   this can't be fully verified without a real device — the pause
   threshold has an "Off" position: dragging `#phraseGapInput` to its
   minimum stores `0` in `lt_phrase_gap_ms`, and `getPhraseGapMs()`
   returns `Infinity` for that specific stored value, permanently
   short-circuiting the `ready` check in `updatePhraseLed()` so it never
-  calls `.select()` at all. `initPhraseGapControl()` reads the
+  touches `sourceText.value` at all. `initPhraseGapControl()` reads the
   raw stored value directly (not through `getPhraseGapMs()`) when
   initializing the slider, specifically to avoid setting the slider's
   HTML `value` to the string `"Infinity"`. `formatPhraseGapLabel()`
@@ -108,8 +107,8 @@
   the red→green transition happens passively as time passes with no DOM
   event of its own — an interval is the only way to notice it, and that
   same passive polling (rather than reacting to `input` events) is what
-  makes it safe for this function to also perform the actual
-  select-for-replacement described above.
+  makes it safe for this function to also perform the actual clear
+  described above.
 - `sourceText` is focused at the end of `init()` (synchronously, after
   the theme/phrase-gap setup but before the `await db.getAllEntries()`
   point) so the on-screen keyboard — and its dictation mic button — is

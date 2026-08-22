@@ -18,15 +18,19 @@ translation saved automatically to a searchable local history.
   keyboard or font familiarity — same idea as the real Google Translate
   app, and it never replaces the actual translation with the romanized
   version the way an earlier build of this app did for Bulgarian.
-- Dictating with the keyboard's mic types straight into the input box, so
-  without help everything you say in one sitting would pile up into one
-  ever-growing block. After a pause (adjustable in Settings, default 4s,
-  or turn it Off to disable this and just let text pile up as before)
-  the next thing you say starts a fresh phrase instead of tacking onto
-  the last one — a small red/green dot under the input box shows whether
-  you're still within that pause window (red) or a new phrase is ready
-  to start (green, also shown whenever the box is empty; hidden entirely
-  when the pause feature is Off).
+- Dictating with the keyboard's mic types straight into the input box,
+  which keeps a running transcript of everything said in one sitting
+  rather than clearing between sentences (nothing in the box is ever
+  touched automatically — only an explicit action like the clear button
+  does that). After a pause (adjustable in Settings, default 4s, or turn
+  it Off to translate the whole growing transcript as one continuous
+  phrase instead) the next thing you say is translated — and saved to
+  history — as its own fresh phrase rather than tacked onto the last
+  one, and the previous phrase's translation stays right where it was
+  until the new one replaces it. A small red/green dot under the input
+  box shows whether you're still within that pause window (red) or a new
+  phrase is ready to start (green; hidden entirely when the pause
+  feature is Off).
 - A small copy icon sits on the translated text — tap it to copy the
   result to your clipboard. The input box has a matching small clear
   (✕) icon in its corner instead of a separate "Clear" text link.

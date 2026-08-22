@@ -10,7 +10,7 @@
 //
 // Keep APP_VERSION in sync with js/version.js (this file can't import it —
 // it runs as a classic worker script, not a module) — bump both on deploy.
-const APP_VERSION = '1.9.8';
+const APP_VERSION = '1.9.9';
 const CACHE_PREFIX = 'translate-history-v';
 const CACHE_NAME = `${CACHE_PREFIX}${APP_VERSION}`;
 

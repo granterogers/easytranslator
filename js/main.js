@@ -27,7 +27,9 @@ const PHRASE_STRIP_QUIET_MS = 700;
 const THEME_KEY = 'lt_theme';
 
 function getPhraseGapMs() {
-  const stored = Number(localStorage.getItem(PHRASE_GAP_KEY));
+  const raw = localStorage.getItem(PHRASE_GAP_KEY);
+  if (raw === null) return DEFAULT_PHRASE_GAP_MS; // never touched the slider — not the same as explicitly set to 0/Off
+  const stored = Number(raw);
   if (stored === 0) return Infinity;
   return stored > 0 ? stored : DEFAULT_PHRASE_GAP_MS;
 }
@@ -309,12 +311,22 @@ let pendingStripPrefix = null;
 let stripTimer = null;
 
 el.sourceText.addEventListener('input', () => {
+  const value = el.sourceText.value;
+
+  // iOS dictation has been observed firing 'input' events that don't
+  // actually change the value (cursor/selection housekeeping, duplicate
+  // interim commits). Treating those as real activity would reset
+  // lastInputAt a moment before the *real* new-phrase text lands, making
+  // that event's gap look too small and silently defeating the
+  // phrase-boundary detection below — the new phrase would just get
+  // appended instead of starting fresh. Only a genuine value change
+  // counts as activity.
+  if (value === lastInputValue) return;
+
   const now = Date.now();
   const gap = now - lastInputAt;
   const previousValue = lastInputValue;
   lastInputAt = now;
-
-  const value = el.sourceText.value;
   lastInputValue = value;
 
   if (gap >= getPhraseGapMs() && previousValue && value.startsWith(previousValue) && value.length > previousValue.length) {
@@ -682,8 +694,9 @@ function formatPhraseGapLabel(seconds) {
 }
 
 function initPhraseGapControl() {
-  const storedMs = Number(localStorage.getItem(PHRASE_GAP_KEY));
-  const seconds = storedMs > 0 ? storedMs / 1000 : (storedMs === 0 ? 0 : DEFAULT_PHRASE_GAP_MS / 1000);
+  const raw = localStorage.getItem(PHRASE_GAP_KEY);
+  const storedMs = raw === null ? null : Number(raw);
+  const seconds = storedMs === null ? DEFAULT_PHRASE_GAP_MS / 1000 : (storedMs > 0 ? storedMs / 1000 : 0);
   el.phraseGapInput.value = String(seconds);
   el.phraseGapValue.textContent = formatPhraseGapLabel(seconds);
   el.phraseGapInput.addEventListener('input', () => {

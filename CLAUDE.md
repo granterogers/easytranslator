@@ -34,6 +34,22 @@
   those don't fire a real `input` event, so skipping this would leave
   the tracking comparing against a stale snapshot from before the
   change.
+- **The `input` listener bails immediately if `el.sourceText.value`
+  didn't actually change** (`value === lastInputValue`), before touching
+  `lastInputAt` at all. A real user reported the reset silently failing —
+  a new dictated phrase would just get appended instead of starting
+  fresh, even with the LED confirming the pause had been long enough.
+  Root cause: iOS dictation has been observed firing `input` events that
+  carry no real value change (cursor/selection housekeeping, a duplicate
+  interim commit). The old code updated `lastInputAt = now` unconditionally
+  on *every* `input` event, so one of these no-op events landing right as
+  speech resumed would quietly refresh the pause clock a moment before
+  the real new-phrase text arrived — making that event's own measured gap
+  look too small and silently defeating the `gap >=` check below, with no
+  further event ever re-checking it (later chunks of the same new phrase
+  have small gaps by design). Guarding on an actual value change removes
+  the dependency on any single `input` event correctly carrying the full
+  pause duration.
 - **The actual old-text-stripping mutation is debounced
   (`PHRASE_STRIP_QUIET_MS`, 700ms), not applied on the same tick that
   detects the pause, and not a one-shot deferred call either.**
@@ -70,7 +86,15 @@
   raw stored value directly (not through `getPhraseGapMs()`) when
   initializing the slider, specifically to avoid setting the slider's
   HTML `value` to the string `"Infinity"`. `formatPhraseGapLabel()`
-  shows "Off" instead of "0.0s" at that position.
+  shows "Off" instead of "0.0s" at that position. Both
+  `getPhraseGapMs()` and `initPhraseGapControl()` check
+  `localStorage.getItem(PHRASE_GAP_KEY) === null` (never touched the
+  slider) *before* calling `Number()` on it — `Number(null)` is `0`,
+  which is indistinguishable from the explicit "Off" sentinel unless the
+  `null` case is handled first. Getting this wrong silently defaulted
+  every fresh install (or anyone who cleared storage) to Off instead of
+  the intended 4s, a real bug caught after the fact — don't collapse
+  these back into a single `Number(localStorage.getItem(...))` call.
 - `#phraseLed` (below the source textarea, `updatePhraseLed()` in
   `js/main.js`) visualizes that same pause window: red while the box has
   text and less than `getPhraseGapMs()` has elapsed since the last

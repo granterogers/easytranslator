@@ -329,8 +329,19 @@ el.sourceText.addEventListener('input', () => {
   lastInputAt = now;
   lastInputValue = value;
 
-  if (gap >= getPhraseGapMs() && previousValue && value.startsWith(previousValue) && value.length > previousValue.length) {
-    pendingStripPrefix = previousValue;
+  // iOS dictation commonly leaves a trailing space after a finished
+  // phrase, then retroactively swaps that space for sentence-ending
+  // punctuation (a period, capitalizing the next word) once a new
+  // phrase starts — so the old phrase's own trailing character can
+  // change out from under us right at the boundary. Comparing against
+  // the trimmed "core" of the old value (no trailing whitespace) means
+  // that swap doesn't break the match — we only require the stable part
+  // of the old phrase to still be there, not its exact trailing
+  // character.
+  const previousCore = previousValue.replace(/\s+$/, '');
+
+  if (gap >= getPhraseGapMs() && previousCore && value.startsWith(previousCore) && value.length > previousCore.length) {
+    pendingStripPrefix = previousCore;
   }
 
   // Rewriting a focused field's value in the same tick — or even shortly
@@ -348,8 +359,16 @@ el.sourceText.addEventListener('input', () => {
       const prefix = pendingStripPrefix;
       pendingStripPrefix = null;
       const current = el.sourceText.value;
-      if (!prefix || !current.startsWith(prefix) || current.length <= prefix.length) return;
-      el.sourceText.value = current.slice(prefix.length).replace(/^\s+/, '');
+      // Cut by length rather than re-checking startsWith here too: by
+      // the time this fires, iOS may have made further small retroactive
+      // edits right at the boundary (the same punctuation-swap behavior
+      // above). Demanding an exact match would just silently give up and
+      // leave both phrases concatenated forever — cutting at the
+      // recorded length and trimming any leftover boundary punctuation
+      // gets the right split even when a character or two of punctuation
+      // landed on the wrong side of it.
+      if (!prefix || current.length <= prefix.length) return;
+      el.sourceText.value = current.slice(prefix.length).replace(/^[\s.,!?;:]+/, '');
       lastInputValue = el.sourceText.value;
       toggleClearButton();
       scheduleTranslate();

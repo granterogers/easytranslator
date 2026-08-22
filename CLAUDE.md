@@ -67,15 +67,33 @@
   fresh `setTimeout`), so the strip only actually fires once
   `PHRASE_STRIP_QUIET_MS` of genuine silence has passed since the *last*
   chunk — never while dictation is still mid-delivery for that phrase,
-  no matter how many chunks arrive. The callback re-reads
-  `el.sourceText.value` at fire time (not a value captured earlier) and
-  bails if it no longer starts with the queued prefix, since
-  `pendingStripPrefix` could in principle be stale by the time the timer
-  fires. Don't shorten this back to a same-tick or single-deferred-tick
-  mutation even though it looks unnecessary in a quick manual/desktop
-  test — the bug only shows up under real iOS dictation, and this
-  project has now been burned twice underestimating how long the OS
-  needs to be left alone.
+  no matter how many chunks arrive. Don't shorten this back to a
+  same-tick or single-deferred-tick mutation even though it looks
+  unnecessary in a quick manual/desktop test — the bug only shows up
+  under real iOS dictation, and this project has now been burned twice
+  underestimating how long the OS needs to be left alone.
+- **Neither the phrase-boundary detection nor the strip itself requires
+  the old phrase's text to still match byte-for-byte.** A real user hit
+  a *third* variant of the appending bug after the two fixes above: iOS
+  dictation commonly leaves a trailing space after a finished phrase,
+  then retroactively swaps that space for sentence-ending punctuation (a
+  period, capitalizing the next word) once a new phrase starts — so the
+  old phrase's own trailing character can change out from under this
+  code right at the boundary. The original code required
+  `value.startsWith(previousValue)` both when first detecting the
+  boundary and again when the debounced strip fired; either check seeing
+  a mismatch caused it to silently give up, forever, since nothing
+  re-checks after that — indistinguishable from the reset never
+  triggering at all. Fixed by (1) detecting the boundary against
+  `previousValue` with trailing whitespace stripped
+  (`previousCore` — a period+space landing where a plain trailing space
+  used to be no longer breaks the `startsWith` match) and (2) dropping
+  the `startsWith` re-check entirely at strip time in favor of a plain
+  length cut (`current.slice(prefix.length)`), trimming any leftover
+  boundary whitespace *and punctuation* (`/^[\s.,!?;:]+/`, widened from
+  just whitespace) off the front of what remains. A length-based cut
+  that's off by a character or two of boundary punctuation is still a
+  strict improvement over refusing to cut at all.
 - As a guaranteed fallback in case the debounce above still isn't
   enough — this can't be verified without a real device — the pause
   threshold has an "Off" position: dragging `#phraseGapInput` to its

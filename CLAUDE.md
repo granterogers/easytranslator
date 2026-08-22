@@ -105,6 +105,14 @@
   `setInterval(250ms)` rather than only from the `input` handler, since
   the red→green transition happens passively as time passes with no DOM
   event of its own — an interval is the only way to notice it.
+- `sourceText` is focused at the end of `init()` (synchronously, after
+  the theme/phrase-gap setup but before the `await db.getAllEntries()`
+  point) so the on-screen keyboard — and its dictation mic button — is
+  ready with no tap needed first. Whether this actually pops the
+  keyboard depends on iOS's user-gesture rules for the software keyboard
+  and can vary by OS version and standalone-PWA vs. Safari-tab context —
+  not verifiable from this sandbox. Harmless either way: worst case the
+  field is just focused without the keyboard appearing yet.
 
 ## Versioning
 

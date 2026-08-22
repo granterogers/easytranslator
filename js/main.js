@@ -769,6 +769,15 @@ async function init() {
   initPhraseGapControl();
   initTheme();
 
+  // Focused on launch so the on-screen keyboard (and its dictation mic
+  // button) is ready with no tap needed first. iOS Safari generally only
+  // opens the software keyboard following an actual user gesture, so
+  // this may or may not actually pop the keyboard depending on OS
+  // version and standalone-PWA vs. browser-tab context — not something
+  // verifiable from this sandbox. Harmless either way: at worst the
+  // field is just focused without the keyboard showing yet.
+  el.sourceText.focus();
+
   if ('storage' in navigator && navigator.storage.persist) {
     navigator.storage.persist().catch(() => {});
   }

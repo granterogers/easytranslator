@@ -12,17 +12,13 @@ const WORD_BOUNDARY_DEBOUNCE_MS = 120;
 const MID_WORD_DEBOUNCE_MS = 450;
 const WORD_BOUNDARY_RE = /[\s.,!?;:\n]$/;
 
-// How long a pause (mainly meant for dictation — see the sourceText
-// 'input' listener) has to be before the next arriving text is treated as
-// a new phrase rather than a continuation. Adjustable via #phraseGapInput
-// in the Settings tab; 0 means "off" (`Infinity` so the gap check below
-// never fires) — a guaranteed way to fully disable the auto-reset if it
-// ever causes trouble, since this feature mutates a field iOS dictation
-// is actively typing into, which is inherently a little risky and can't
-// be fully verified without a real device.
+// How long a pause (mainly meant for dictation — see updatePhraseLed()
+// below) has to elapse before the box is cleared for a new phrase.
+// Adjustable via #phraseGapInput in the Settings tab; 0 means "off"
+// (`Infinity` so the ready check never fires) — a guaranteed way to fully
+// disable the auto-reset if it ever causes trouble.
 const PHRASE_GAP_KEY = 'lt_phrase_gap_ms';
 const DEFAULT_PHRASE_GAP_MS = 4000;
-const PHRASE_STRIP_QUIET_MS = 700;
 
 const THEME_KEY = 'lt_theme';
 
@@ -263,16 +259,25 @@ function toggleClearButton() {
 // Dictation via the iOS keyboard's mic types straight into the focused
 // field, so without this a whole day's worth of separate things you say
 // would just keep piling up into one ever-growing block instead of each
-// becoming its own translation. If enough silence (adjustable via
-// #phraseGapInput in Settings) passes between two keystrokes/dictated
-// chunks, the next arriving text is treated as a brand-new phrase:
-// whatever was already there (already translated by the live-as-you-type
-// flow below, since MID_WORD_DEBOUNCE_MS is far shorter than any
-// reasonable pause setting) gets cleared, keeping only the newly-arrived
-// text. This can't distinguish dictation from manual typing — a manual
-// typist who pauses to think for longer than the threshold and then
-// continues the SAME sentence will also have the earlier part cleared,
-// which is a real tradeoff of this feature, not an edge case to "fix".
+// becoming its own translation. Earlier versions of this feature waited
+// for new text to arrive, detected that it had been appended onto the
+// old phrase, and stripped the old part back off afterward — three
+// separate real-device bugs (a dictation stall from mutating the field
+// mid-insertion, a silently-reset pause clock, an exact-text-match that
+// broke on iOS's own retroactive punctuation) all came from mutating the
+// field reactively, at or near the moment new text was actively arriving.
+// This version sidesteps all of that: the box is cleared proactively,
+// the instant the pause threshold elapses — see the `ready && hasText`
+// branch in updatePhraseLed() below, which runs on a plain polling
+// interval, not in response to any input event. By construction this can
+// only ever fire during confirmed silence (an elapsed multi-second gap
+// since the last keystroke), never while iOS is actively inserting
+// dictated text, so there's no stall risk and nothing to compare the new
+// text against — the box is simply already empty by the time the next
+// phrase starts. This can't distinguish dictation from manual typing — a
+// manual typist who pauses to think for longer than the threshold will
+// also come back to an emptied box, which is a real tradeoff of this
+// feature, not an edge case to "fix".
 let lastInputAt = Date.now();
 let lastInputValue = '';
 
@@ -282,7 +287,8 @@ let lastInputValue = '';
 // empty. Hidden entirely when the feature is off (see getPhraseGapMs()).
 // Polled on an interval rather than only on 'input' because the
 // red→green transition happens passively as time passes, with no event
-// of its own to react to.
+// of its own to react to — and that same passive polling is what makes
+// it safe to also perform the actual phrase-reset here (see above).
 function updatePhraseLed() {
   const disabled = !Number.isFinite(getPhraseGapMs());
   el.phraseLed.hidden = disabled;
@@ -290,25 +296,26 @@ function updatePhraseLed() {
   const hasText = el.sourceText.value.trim().length > 0;
   const ready = !hasText || (Date.now() - lastInputAt) >= getPhraseGapMs();
   el.phraseLed.classList.toggle('is-ready', ready);
+
+  if (ready && hasText) {
+    el.sourceText.value = '';
+    syncInputTracking();
+    toggleClearButton();
+    scheduleTranslate();
+  }
 }
 setInterval(updatePhraseLed, 250);
 
 // Call after any PROGRAMMATIC change to sourceText.value (restoring a
-// history entry, the clear button, swap) — those don't fire a real
-// 'input' event, so without this the pause-tracking above would compare
-// the next real keystroke/dictated chunk against a stale snapshot from
-// before the change and could mis-fire the phrase-reset logic.
+// history entry, the clear button, swap, the auto-reset above) — those
+// don't fire a real 'input' event, so without this the pause-tracking
+// above would compare the next real keystroke/dictated chunk against a
+// stale snapshot from before the change and could mis-fire the
+// phrase-reset logic.
 function syncInputTracking() {
   lastInputAt = Date.now();
   lastInputValue = el.sourceText.value;
-  pendingStripPrefix = null;
-  updatePhraseLed();
 }
-
-// The prefix (text from before the detected pause) waiting to be
-// stripped once things go quiet again — see the 'input' listener below.
-let pendingStripPrefix = null;
-let stripTimer = null;
 
 el.sourceText.addEventListener('input', () => {
   const value = el.sourceText.value;
@@ -316,64 +323,13 @@ el.sourceText.addEventListener('input', () => {
   // iOS dictation has been observed firing 'input' events that don't
   // actually change the value (cursor/selection housekeeping, duplicate
   // interim commits). Treating those as real activity would reset
-  // lastInputAt a moment before the *real* new-phrase text lands, making
-  // that event's gap look too small and silently defeating the
-  // phrase-boundary detection below — the new phrase would just get
-  // appended instead of starting fresh. Only a genuine value change
-  // counts as activity.
+  // lastInputAt a moment before the *real* next dictated chunk arrived,
+  // making the pause look shorter than it really was. Only a genuine
+  // value change counts as activity.
   if (value === lastInputValue) return;
 
-  const now = Date.now();
-  const gap = now - lastInputAt;
-  const previousValue = lastInputValue;
-  lastInputAt = now;
+  lastInputAt = Date.now();
   lastInputValue = value;
-
-  // iOS dictation commonly leaves a trailing space after a finished
-  // phrase, then retroactively swaps that space for sentence-ending
-  // punctuation (a period, capitalizing the next word) once a new
-  // phrase starts — so the old phrase's own trailing character can
-  // change out from under us right at the boundary. Comparing against
-  // the trimmed "core" of the old value (no trailing whitespace) means
-  // that swap doesn't break the match — we only require the stable part
-  // of the old phrase to still be there, not its exact trailing
-  // character.
-  const previousCore = previousValue.replace(/\s+$/, '');
-
-  if (gap >= getPhraseGapMs() && previousCore && value.startsWith(previousCore) && value.length > previousCore.length) {
-    pendingStripPrefix = previousCore;
-  }
-
-  // Rewriting a focused field's value in the same tick — or even shortly
-  // after — the OS's own text insertion into it has been observed on a
-  // real device to confuse iOS dictation, stalling it for the better
-  // part of a minute before it catches up and flushes whatever it was in
-  // the middle of inserting. So the actual strip only happens once
-  // PHRASE_STRIP_QUIET_MS has passed with no further input at all —
-  // every new chunk of dictated text (including ones for the SAME new
-  // phrase, arriving in quick succession as speech is recognized)
-  // re-arms this timer rather than the strip firing mid-utterance.
-  if (pendingStripPrefix !== null) {
-    clearTimeout(stripTimer);
-    stripTimer = setTimeout(() => {
-      const prefix = pendingStripPrefix;
-      pendingStripPrefix = null;
-      const current = el.sourceText.value;
-      // Cut by length rather than re-checking startsWith here too: by
-      // the time this fires, iOS may have made further small retroactive
-      // edits right at the boundary (the same punctuation-swap behavior
-      // above). Demanding an exact match would just silently give up and
-      // leave both phrases concatenated forever — cutting at the
-      // recorded length and trimming any leftover boundary punctuation
-      // gets the right split even when a character or two of punctuation
-      // landed on the wrong side of it.
-      if (!prefix || current.length <= prefix.length) return;
-      el.sourceText.value = current.slice(prefix.length).replace(/^[\s.,!?;:]+/, '');
-      lastInputValue = el.sourceText.value;
-      toggleClearButton();
-      scheduleTranslate();
-    }, PHRASE_STRIP_QUIET_MS);
-  }
 
   updatePhraseLed();
   toggleClearButton();

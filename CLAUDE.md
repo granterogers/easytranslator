@@ -9,97 +9,61 @@
   short debounce, and a longer one mid-word (`WORD_BOUNDARY_DEBOUNCE_MS` /
   `MID_WORD_DEBOUNCE_MS` in `js/main.js`) — the goal is visibly updating
   word-by-word, not waiting for the user to stop typing entirely.
-- `sourceText`'s 'input' listener also tracks the gap since the previous
-  keystroke/dictated chunk (`lastInputAt`/`lastInputValue`). If that gap
-  is at least `getPhraseGapMs()` (adjustable via `#phraseGapInput` in
-  Settings, default 4s, `lt_phrase_gap_ms` in `localStorage`) AND the
-  new value is the old value with more text appended, the old text
-  (`pendingStripPrefix`) is queued for removal — see the debounce below
-  for when it actually gets stripped. This exists for dictation
-  specifically: the iOS keyboard's mic types straight into the focused
-  field, so without this, everything said in one sitting would pile up
-  into one ever-growing block instead of each pause-separated thing
-  becoming its own translation (the already-completed phrase is already
-  saved to history by the live-translate flow by the time the pause is
-  detected, since `MID_WORD_DEBOUNCE_MS` is far shorter than any sane
-  pause setting — this only affects what's left sitting in the input
-  box, not what already got saved). There's no way to distinguish
-  dictation from manual typing at the input-event level, so a person who
-  manually pauses mid-thought for longer than the threshold and then
-  keeps typing the *same* sentence will also get the earlier part wiped —
-  a real, accepted tradeoff of this feature, not a bug to chase.
-  `syncInputTracking()` re-syncs `lastInputAt`/`lastInputValue` (and
-  clears any pending strip) after every *programmatic* change to
-  `sourceText.value` (clear button, restoring a history entry, swap) —
-  those don't fire a real `input` event, so skipping this would leave
-  the tracking comparing against a stale snapshot from before the
-  change.
-- **The `input` listener bails immediately if `el.sourceText.value`
-  didn't actually change** (`value === lastInputValue`), before touching
-  `lastInputAt` at all. A real user reported the reset silently failing —
-  a new dictated phrase would just get appended instead of starting
-  fresh, even with the LED confirming the pause had been long enough.
-  Root cause: iOS dictation has been observed firing `input` events that
-  carry no real value change (cursor/selection housekeeping, a duplicate
-  interim commit). The old code updated `lastInputAt = now` unconditionally
-  on *every* `input` event, so one of these no-op events landing right as
-  speech resumed would quietly refresh the pause clock a moment before
-  the real new-phrase text arrived — making that event's own measured gap
-  look too small and silently defeating the `gap >=` check below, with no
-  further event ever re-checking it (later chunks of the same new phrase
-  have small gaps by design). Guarding on an actual value change removes
-  the dependency on any single `input` event correctly carrying the full
-  pause duration.
-- **The actual old-text-stripping mutation is debounced
-  (`PHRASE_STRIP_QUIET_MS`, 700ms), not applied on the same tick that
-  detects the pause, and not a one-shot deferred call either.**
-  Confirmed on a real device: rewriting `sourceText.value` while iOS
-  dictation is actively inserting into that same field — even a single
-  tick later via `setTimeout(fn, 0)`, which was the first fix attempted
-  here — can still stall the dictation engine for the better part of a
-  minute before it catches up and flushes whatever it was in the middle
-  of inserting; a real user hit this a second time after the one-shot
-  version shipped. Presumably a single deferred call still lands inside
-  the OS's own multi-chunk delivery of one dictated utterance, since
-  fast speech arrives as several back-to-back `input` events rather than
-  one. The fix: every `input` event that has a `pendingStripPrefix`
-  pending clears and re-arms a single `stripTimer` (`clearTimeout` +
-  fresh `setTimeout`), so the strip only actually fires once
-  `PHRASE_STRIP_QUIET_MS` of genuine silence has passed since the *last*
-  chunk — never while dictation is still mid-delivery for that phrase,
-  no matter how many chunks arrive. Don't shorten this back to a
-  same-tick or single-deferred-tick mutation even though it looks
-  unnecessary in a quick manual/desktop test — the bug only shows up
-  under real iOS dictation, and this project has now been burned twice
-  underestimating how long the OS needs to be left alone.
-- **Neither the phrase-boundary detection nor the strip itself requires
-  the old phrase's text to still match byte-for-byte.** A real user hit
-  a *third* variant of the appending bug after the two fixes above: iOS
-  dictation commonly leaves a trailing space after a finished phrase,
-  then retroactively swaps that space for sentence-ending punctuation (a
-  period, capitalizing the next word) once a new phrase starts — so the
-  old phrase's own trailing character can change out from under this
-  code right at the boundary. The original code required
-  `value.startsWith(previousValue)` both when first detecting the
-  boundary and again when the debounced strip fired; either check seeing
-  a mismatch caused it to silently give up, forever, since nothing
-  re-checks after that — indistinguishable from the reset never
-  triggering at all. Fixed by (1) detecting the boundary against
-  `previousValue` with trailing whitespace stripped
-  (`previousCore` — a period+space landing where a plain trailing space
-  used to be no longer breaks the `startsWith` match) and (2) dropping
-  the `startsWith` re-check entirely at strip time in favor of a plain
-  length cut (`current.slice(prefix.length)`), trimming any leftover
-  boundary whitespace *and punctuation* (`/^[\s.,!?;:]+/`, widened from
-  just whitespace) off the front of what remains. A length-based cut
-  that's off by a character or two of boundary punctuation is still a
-  strict improvement over refusing to cut at all.
-- As a guaranteed fallback in case the debounce above still isn't
-  enough — this can't be verified without a real device — the pause
+- Dictation via the iOS keyboard's mic types straight into the focused
+  `sourceText` field, so without help a whole day's worth of separate
+  things you say would pile up into one ever-growing block instead of
+  each pause-separated thing becoming its own translation. **This went
+  through three failed designs before landing on the current one — all
+  three tried to react to new text *after* it arrived** (detect that it
+  had been appended onto the old phrase, then strip the old part back
+  off), and all three broke on real iOS hardware in different ways: (1)
+  mutating `sourceText.value` synchronously (or even one tick later, or
+  after a short debounce) while iOS was still actively inserting text for
+  that phrase stalled the dictation engine for up to a minute; (2) the
+  `input` listener reset its own pause clock on iOS's no-op events
+  (cursor housekeeping, duplicate interim commits), silently defeating
+  the gap check; (3) iOS retroactively swapping a phrase's trailing space
+  for sentence-ending punctuation broke an exact-text-match the strip
+  logic depended on. All three symptoms looked identical from the
+  outside ("it just keeps appending") because in every case the failure
+  mode was "silently do nothing," with nothing left to notice or retry.
+  The current design (`updatePhraseLed()` in `js/main.js`) sidesteps the
+  whole category: instead of reacting to new text, it clears
+  `sourceText.value` proactively, the moment `getPhraseGapMs()` of
+  silence has elapsed (adjustable via `#phraseGapInput` in Settings,
+  default 4s, `lt_phrase_gap_ms` in `localStorage`), on the plain
+  `setInterval(250ms)` poll that already drove the LED below — not in
+  response to any `input` event. By construction this can only ever fire
+  during confirmed silence, never while iOS is actively inserting
+  dictated text, so there's no stall risk, and there's no old text left
+  to compare the new text against — the box is simply already empty by
+  the time the next phrase starts, so nothing can silently fail to
+  match. The already-completed phrase is already saved to history by the
+  live-translate flow by the time the pause is detected, since
+  `MID_WORD_DEBOUNCE_MS` is far shorter than any sane pause setting —
+  this only affects what's left sitting in the input box, not what
+  already got saved. There's no way to distinguish dictation from manual
+  typing at the input-event level, so a person who manually pauses
+  mid-thought for longer than the threshold will also come back to an
+  emptied box — a real, accepted tradeoff of this feature, not a bug to
+  chase.
+- The `input` listener bails immediately if `el.sourceText.value` didn't
+  actually change (`value === lastInputValue`), before touching
+  `lastInputAt` at all — iOS dictation has been observed firing `input`
+  events with no real value change, which would otherwise reset the
+  pause clock right as a real chunk arrives and make that chunk's own
+  measured gap look too small. `syncInputTracking()` re-syncs
+  `lastInputAt`/`lastInputValue` after every *programmatic* change to
+  `sourceText.value` (clear button, restoring a history entry, swap, the
+  proactive auto-clear itself) — those don't fire a real `input` event,
+  so skipping this would leave the tracking comparing against a stale
+  snapshot from before the change.
+- As a guaranteed fallback in case the design above still isn't enough —
+  this can't be fully verified without a real device — the pause
   threshold has an "Off" position: dragging `#phraseGapInput` to its
   minimum stores `0` in `lt_phrase_gap_ms`, and `getPhraseGapMs()`
   returns `Infinity` for that specific stored value, permanently
-  short-circuiting the `gap >=` check above so the input listener never
+  short-circuiting the `ready` check in `updatePhraseLed()` so it never
   touches `sourceText.value` at all. `initPhraseGapControl()` reads the
   raw stored value directly (not through `getPhraseGapMs()`) when
   initializing the slider, specifically to avoid setting the slider's
@@ -122,7 +86,10 @@
   permanently-green LED would just be visual noise. Polled on a
   `setInterval(250ms)` rather than only from the `input` handler, since
   the red→green transition happens passively as time passes with no DOM
-  event of its own — an interval is the only way to notice it.
+  event of its own — an interval is the only way to notice it, and that
+  same passive polling (rather than reacting to `input` events) is what
+  makes it safe for this function to also perform the actual proactive
+  clear described above.
 - `sourceText` is focused at the end of `init()` (synchronously, after
   the theme/phrase-gap setup but before the `await db.getAllEntries()`
   point) so the on-screen keyboard — and its dictation mic button — is

@@ -44,36 +44,55 @@
   `.source-text`'s font, padding, or line-height, change
   `.source-overlay` identically or the visible text will drift out of
   alignment with the field it's standing in for.**
-  Which text is "current" is `phraseBoundaryOffset`, a plain JS number:
-  the index in the field's value where the current phrase starts.
-  `getPhraseStart()` also skips any separator characters sitting right
-  at that index, so a new phrase never renders with a leading `" "` or
-  `". "` left over. `getCurrentPhraseText()` is what the live-translate
+  Which text is "current" is `committedWordCount`, a plain JS number:
+  **how many words at the start of the field belong to already-finished
+  phrases** — deliberately a word count, not a character offset. When
+  dictation is switched off, iOS commits its final transcript by
+  clearing the field and refilling it with the whole session's text,
+  re-punctuated. A character offset did not survive that: the empty
+  value clamped it to 0, the refill arrived with no previous value to
+  measure against, and every phrase said all session reappeared at once
+  (a real reported bug). A word count does survive it — the same words
+  are still there in the same order, whatever happened to the spacing
+  and punctuation around them. For the same reason it is **never
+  clamped when the value shrinks**: a transient empty value is exactly
+  what iOS produces mid-commit. `getPhraseStart()` instead handles
+  "fewer words present than committed" by treating the whole field as
+  current, and skips any separator characters at the boundary so a new
+  phrase never renders with a leading `" "` or `". "` left over.
+  One guard goes with this: if new text arrives and the last committed
+  word now runs to the very end of the field, those characters merged
+  into it (backspacing into a committed word, then typing on), so the
+  count hands that word back — otherwise typing goes invisible. That
+  test uses `committedPrefixEnd()`, **not** `getPhraseStart()`: when a
+  new phrase opens with a space the phrase really is empty for one
+  keystroke, and skipping separators first misreads that as staleness
+  and leaks the previous word back into every phrase.
+  `getCurrentPhraseText()` is what the live-translate
   flow translates and saves to history, what `toggleClearButton()` and
   `updatePhraseLed()` read, and what `swapBtn` reverses — **not** the raw
   field value, which holds the whole hidden transcript.
-  The offset advances in the `input` handler at the moment the first
+  The count advances in the `input` handler at the moment the first
   chunk of a NEW phrase lands (a real pause elapsed AND the value grew)
   — deliberately **not** on the idle timer. That ordering is the whole
   point and was an explicit user requirement: during the pause the
-  offset is unchanged, so the phrase you just said stays on screen with
-  its translation; the instant you start saying something new the offset
+  count is unchanged, so the phrase you just said stays on screen with
+  its translation; the instant you start saying something new the count
   jumps and the box shows only the new words. Cleared first, then
   filled, with no write to the field to make it happen. An earlier
   version that advanced this on the idle poll wiped the English the
   moment the LED went green, which is wrong — "idle" is not "starting a
   new phrase".
-  The boundary is recorded as a LENGTH (`previousValue.length`), never by
-  matching the old phrase's characters, so iOS retroactively editing the
-  old phrase's tail (e.g. swapping its trailing space for a period once
-  a new sentence starts — a real bug in an earlier round) can't make
-  this silently do nothing. Deleting back past the boundary clamps it to
-  the new length. There's no way to distinguish dictation from manual
+  The boundary is recorded by COUNTING the previous value's words, never
+  by matching the old phrase's characters, so iOS retroactively editing
+  the old phrase's tail (e.g. swapping its trailing space for a period
+  once a new sentence starts — a real bug in an earlier round) can't
+  make this silently do nothing. There's no way to distinguish dictation from manual
   typing at the input-event level, so someone who manually pauses
   mid-thought past the threshold and keeps typing the same sentence will
   also see the earlier part drop out of view — a real, accepted
   tradeoff, not a bug to chase. `syncInputTracking()` re-syncs
-  `lastInputAt`/`lastInputValue` and resets the offset to 0 after every
+  `lastInputAt`/`lastInputValue` and resets the count to 0 after every
   *programmatic* change to `sourceText.value` (clear button, restoring a
   history entry, swap) — those don't fire a real `input` event, and each
   replaces the whole field, so the new value is one fresh phrase. Those
@@ -258,19 +277,38 @@
   self-hosting support is ever needed, that's a feature to add
   deliberately (a server-URL field in Settings), not something implied
   by Settings existing now.
-- Before falling all the way to the bundled dictionary, `runTranslate()`'s
-  `catch` around the online call first tries `findHistoryMatch()` — an
-  exact (trimmed, case-insensitive) lookup against this device's own
-  saved history for the same source/target pair. This is what makes any
-  language pair usable offline, not just ones with a bundled dictionary:
-  once you've translated a phrase online once
+- **`runTranslate()` checks the local index BEFORE it touches the
+  network at all**, not only as an offline fallback. `findHistoryMatch()`
+  is an exact (trimmed, case-insensitive) lookup against this device's
+  own saved history for the same source/target pair; a hit is rendered
+  immediately with no request, no spinner, and no history row written
+  (it's already in there — don't duplicate it). This is the main reason
+  the app feels faster the more it's used, and it's a real answer to
+  "make it work offline": once a phrase has been translated online once
   (through whichever provider — Google, LibreTranslate, MyMemory — was
-  live at the time), retyping that exact phrase later with no network at
-  all replays the real saved result, full quality, no `#translationNote`
-  disclaimer. It's exact-match only, deliberately — no fuzzy/partial
-  matching, since a near-miss could replay the wrong sentence's
-  translation with no way for the user to tell. Only text that's never
-  been translated before falls through further to the dictionary below.
+  live at the time), saying it again with no network at all replays the
+  real saved result, full quality, no `#translationNote` disclaimer.
+  This used to run only *after* the network had already failed, so a
+  phrase said a hundred times still cost a full round trip every time.
+  It's exact-match only, deliberately — no fuzzy/partial matching, since
+  a near-miss could replay the wrong sentence's translation with no way
+  for the user to tell. Only text that's never been translated before
+  goes to the network, and only then to the dictionary below.
+- The lookup is backed by `translationIndex`, a `Map` keyed by
+  `` `${source}|${target}|${normalizedText}` ``, **not** a scan of
+  `allEntries` — it's consulted before every translation now (so, in
+  effect, on every word boundary while typing or dictating), and a linear
+  scan over thousands of entries at that rate would itself become the
+  slowdown. Keep it in sync with `allEntries`: `rebuildTranslationIndex()`
+  on load (oldest-first, so a newer re-translation wins),
+  `indexTranslation()` on each new entry, `unindexTranslation()` on single
+  delete, `.clear()` on clear-all. Forgetting the delete paths means a
+  deleted translation keeps coming back from memory for the rest of the
+  session.
+- `index.html` preconnects to `https://translate.googleapis.com` so the
+  first translation of a session doesn't pay DNS + TLS setup on top of
+  the request. Harmless if that provider goes unused (a different one is
+  remembered, or everything comes from the index above).
 - `js/dictionary.js` is the true last resort, below even the servers and
   the history-reuse lookup above: a bundled word/phrase list
   (`DICTIONARIES`, keyed by `"src:tgt"`) used only when `api.translateText()`

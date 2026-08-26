@@ -24,6 +24,13 @@
 <link rel="icon" href="icons/icon-192.png">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="css/styles.css">
+
+<!-- Warm up DNS + TLS to the default translation provider while the page
+     is still loading, so the first translation of a session doesn't pay
+     for connection setup on top of the request itself. Costs nothing if
+     the provider ends up unused (a different one is remembered, or
+     everything is served from the local index). -->
+<link rel="preconnect" href="https://translate.googleapis.com" crossorigin>
 </head>
 <body>
 

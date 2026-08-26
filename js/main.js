@@ -284,10 +284,10 @@ function toggleClearButton() {
 //
 // So: keep the engine that works, and fix the appearance separately.
 // `sourceText.value` is never rewritten here — dictation appends to it
-// freely for the whole session. `phraseBoundaryOffset` is a plain JS
+// freely for the whole session. `committedWordCount` is a plain JS
 // number marking where the current phrase starts inside that value, and
 // `#sourceOverlay` (see renderSourceOverlay() below) paints ONLY the
-// text from that offset onward over the top of the field, whose own
+// text from that point onward over the top of the field, whose own
 // text is transparent. Visually the box holds exactly the current
 // phrase; underneath, the field iOS is dictating into is never touched.
 //
@@ -311,16 +311,54 @@ function toggleClearButton() {
 // earlier part drop out of view — a real, accepted tradeoff, not a bug.
 let lastInputAt = Date.now();
 let lastInputValue = '';
-let phraseBoundaryOffset = 0;
+// How many words at the START of the field belong to phrases already
+// finished — deliberately a WORD COUNT, not a character offset. When
+// dictation is switched off, iOS commits its final transcript by
+// clearing the field and refilling it with the whole session's text (and
+// re-punctuating it on the way). A character offset does not survive
+// that: the empty value clamps it to 0, the refill arrives with no
+// previous value to measure against, and every phrase said all session
+// reappears at once. A word count survives it — the same words are still
+// there in the same order, whatever happened to the spacing and
+// punctuation around them.
+let committedWordCount = 0;
 
 const PHRASE_SEPARATOR_RE = /[\s.,!?;:]/;
+
+function countWords(text) {
+  const words = text.match(/\S+/g);
+  return words ? words.length : 0;
+}
 
 // Where the visible phrase actually begins: the recorded boundary, plus
 // any separator characters sitting right at it (so a new phrase never
 // renders with a leading " " or ". " left over from the previous one).
+// Index just past the last committed word, or -1 if the field no longer
+// holds that many words at all.
+function committedPrefixEnd() {
+  const full = el.sourceText.value;
+  if (committedWordCount <= 0) return 0;
+
+  const wordRe = /\S+/g;
+  let seen = 0;
+  let match;
+  while ((match = wordRe.exec(full)) !== null) {
+    if (++seen === committedWordCount) return match.index + match[0].length;
+  }
+  return -1;
+}
+
 function getPhraseStart() {
   const full = el.sourceText.value;
-  let i = Math.min(phraseBoundaryOffset, full.length);
+  // end < 0 means fewer words are present than we'd committed — the
+  // field was replaced or deleted down past the boundary, so there's no
+  // committed prefix left to skip and whatever remains is the current
+  // phrase. (Without this, typing a fresh short phrase after clearing by
+  // hand would render as an empty box.)
+  const end = committedPrefixEnd();
+  if (end <= 0) return 0;
+
+  let i = end;
   while (i < full.length && PHRASE_SEPARATOR_RE.test(full[i])) i++;
   return i;
 }
@@ -408,7 +446,7 @@ setInterval(updatePhraseLed, 250);
 function syncInputTracking() {
   lastInputAt = Date.now();
   lastInputValue = el.sourceText.value;
-  phraseBoundaryOffset = 0;
+  committedWordCount = 0;
   renderSourceOverlay();
 }
 
@@ -431,13 +469,27 @@ el.sourceText.addEventListener('input', () => {
 
   if (gap >= getPhraseGapMs() && previousValue && value.length > previousValue.length) {
     // A real pause elapsed and new text just landed on top of the old
-    // phrase: everything up to where it started is now a previous
-    // phrase. Moving this number is the entire "clear" — no write to
-    // the field, so nothing for live dictation to collide with.
-    phraseBoundaryOffset = previousValue.length;
-  } else if (value.length < phraseBoundaryOffset) {
-    // Backspaced past the boundary (manual editing) — keep it in range.
-    phraseBoundaryOffset = value.length;
+    // phrase: every word up to that point belongs to a finished phrase.
+    // Moving this count is the entire "clear" — no write to the field,
+    // so nothing for live dictation to collide with. It is NOT clamped
+    // when the value shrinks: a transient empty value is exactly what
+    // iOS produces mid-commit when dictation is switched off, and
+    // resetting on it is what used to dump the whole session on screen.
+    // getPhraseStart() handles "fewer words than committed" instead.
+    committedWordCount = countWords(previousValue);
+  }
+
+  // New text arrived, yet the last committed word now runs to the very
+  // end of the field: the boundary is stale because those characters
+  // merged into it (backspacing into a committed word, then typing on).
+  // Hand that word back to the current phrase — otherwise typing would
+  // go invisible, since the overlay would have nothing left to draw.
+  // Tested against committedPrefixEnd() rather than getPhraseStart() on
+  // purpose: when a new phrase opens with a space, the phrase really is
+  // empty for that one keystroke, and skipping separators first would
+  // misread that as staleness and leak the previous word back in.
+  if (value.length > previousValue.length && committedPrefixEnd() === value.length) {
+    committedWordCount = Math.max(0, countWords(value) - 1);
   }
 
   updatePhraseLed();
@@ -500,11 +552,33 @@ function scheduleTranslate() {
 // matches would risk returning something for the wrong sentence. Searches
 // newest-first so a since-corrected re-translation of the same text wins
 // over an older one.
+// Indexed for O(1) lookup rather than scanning allEntries: this is now
+// consulted before every single translation (see runTranslate), not just
+// on the offline fallback path, and a linear scan of a few thousand
+// entries on every keystroke would itself become the slowdown.
+const translationIndex = new Map();
+
+function translationKey(source, target, text) {
+  return `${source}|${target}|${text.trim().toLowerCase()}`;
+}
+
+function indexTranslation(entry) {
+  translationIndex.set(translationKey(entry.sourceLang, entry.targetLang, entry.sourceText), entry);
+}
+
+function unindexTranslation(entry) {
+  translationIndex.delete(translationKey(entry.sourceLang, entry.targetLang, entry.sourceText));
+}
+
+// Oldest first, so a newer re-translation of the same text overwrites an
+// older one (allEntries is newest-first).
+function rebuildTranslationIndex() {
+  translationIndex.clear();
+  for (let i = allEntries.length - 1; i >= 0; i--) indexTranslation(allEntries[i]);
+}
+
 function findHistoryMatch(source, target, text) {
-  const norm = text.trim().toLowerCase();
-  return allEntries.find((e) =>
-    e.sourceLang === source && e.targetLang === target && e.sourceText.trim().toLowerCase() === norm
-  ) || null;
+  return translationIndex.get(translationKey(source, target, text)) || null;
 }
 
 // Google is the expected/default-quality provider (see js/api.js), so no
@@ -541,7 +615,19 @@ async function runTranslate() {
 
   const token = (translateToken += 1);
   hideError();
-  setBusy(true);
+
+  // Instant local replay, BEFORE any network call. Anything this device
+  // has already translated for this exact pair comes back with no
+  // request at all — no round trip, no spinner, works with the network
+  // off entirely. This is what makes the app get faster the more it's
+  // used, and it covers the realistic dictation case well: re-saying the
+  // same phrase, and every intermediate prefix of a phrase you're part
+  // way through re-saying, is already indexed from last time.
+  // (This used to run only as an offline fallback after the network had
+  // already failed, which meant a phrase you'd said a hundred times
+  // still cost a full round trip every time.)
+  const cached = source !== 'auto' ? findHistoryMatch(source, target, text) : null;
+  if (!cached) setBusy(true);
 
   try {
     let translatedText;
@@ -549,7 +635,13 @@ async function runTranslate() {
     let usedDictionary = false;
     let provider = null;
     let googleError = null;
-    try {
+    if (cached) {
+      translatedText = cached.translatedText;
+      detectedLanguage = cached.detectedLanguage || null;
+      usedDictionary = Boolean(cached.usedDictionary);
+      provider = cached.provider || null;
+      googleError = cached.googleError || null;
+    } else try {
       const result = await api.translateText({ text, source, target });
       translatedText = result.translatedText;
       detectedLanguage = result.detectedLanguage;
@@ -603,6 +695,10 @@ async function runTranslate() {
       el.detectedLabel.hidden = true;
     }
 
+    // Served from the local index — it's already in history, so don't
+    // write a duplicate entry every time an old phrase is repeated.
+    if (cached) return;
+
     const entry = {
       sourceText: text,
       translatedText,
@@ -617,6 +713,7 @@ async function runTranslate() {
     const id = await db.addEntry(entry);
     entry.id = id;
     allEntries.unshift(entry);
+    indexTranslation(entry);
     renderHistory();
   } catch (err) {
     if (token !== translateToken) return;
@@ -757,7 +854,11 @@ function restoreEntry(entry) {
 
 async function handleDelete(id) {
   await db.deleteEntry(id);
+  const removed = allEntries.find((e) => e.id === id);
   allEntries = allEntries.filter((e) => e.id !== id);
+  // Drop it from the instant-replay index too, or a deleted translation
+  // would keep coming back from memory for the rest of the session.
+  if (removed) unindexTranslation(removed);
   renderHistory();
 }
 
@@ -766,6 +867,7 @@ el.clearAllBtn.addEventListener('click', async () => {
   if (!window.confirm('Delete all history? This cannot be undone.')) return;
   await db.clearAllEntries();
   allEntries = [];
+  translationIndex.clear();
   renderHistory();
 });
 
@@ -883,6 +985,7 @@ async function init() {
   api.fetchLanguages().then(refreshLanguageOptions).catch(() => {});
 
   allEntries = await db.getAllEntries();
+  rebuildTranslationIndex();
   renderHistory();
 
   toggleClearButton();

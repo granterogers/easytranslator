@@ -68,20 +68,23 @@ a separate independent public translation API. Whichever one actually
 answers is remembered so it's tried first next time — there's no way to
 pin a specific one manually, it's fully automatic.
 
-## Offline fallbacks (last resort)
+## Speed and offline
 
-There's no on-device/downloadable translation model — every translation
-goes through the server providers above. If every server is unreachable,
-the app doesn't just fail:
+There's no on-device/downloadable translation model — every *new*
+phrase goes through the server providers above. But anything you've
+already translated is answered from your own device:
 
-1. **Your own history first.** If you've translated this exact phrase
-   before while online — through any of the providers above — retyping
-   it later with no connection at all instantly replays that real,
-   full-quality result. This works for *any* language pair, not just
-   ones with a bundled dictionary, and it's built entirely from your own
-   past usage, growing automatically the more you use the app.
+1. **Your own history first — before the network, not after it.** If
+   you've translated this exact phrase before, it comes straight back
+   from local storage with no request at all: instant, and identical
+   whether you're online or completely offline. This works for *any*
+   language pair, not just ones with a bundled dictionary, and it's
+   built entirely from your own past usage, so the app keeps getting
+   faster the more you use it — the phrases you actually repeat stop
+   costing a round trip at all.
 2. **Bundled word dictionary**, only if the phrase has never been
-   translated before. A small built-in word-for-word list (~500 entries
+   translated before and every server is unreachable.
+   A small built-in word-for-word list (~500 entries
    for English → Bulgarian today, the one pair that needs it) — enough
    to get the gist of a few words across with zero network and zero
    download. It's word-by-word only (no grammar or word order), so

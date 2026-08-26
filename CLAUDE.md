@@ -180,6 +180,20 @@
   open the software keyboard for. It bails on
   `button, select, input, textarea, a, [tabindex], .tabbar` so it can't
   steal focus from a control the user actually tapped.
+  **That handler blurs before focusing when the field is already
+  focused**, which it is right after launch thanks to `autofocus`:
+  calling `focus()` on the already-focused element is a no-op, no focus
+  CHANGE occurs, and iOS therefore raises nothing — so the tap did
+  nothing at all in exactly the case that matters most. Bouncing focus
+  gives the gesture a real blur→focus transition to act on.
+- **The keyboard cannot be opened on launch, and this is not worth
+  retrying.** WebKit only raises the software keyboard in response to a
+  genuine user gesture; `focus()` from page load (or a timer, or
+  `requestAnimationFrame`, or a synthesised touch/click event) focuses
+  the field but leaves the keyboard down, by design. The achievable goal
+  is what's implemented above: the field is already focused, so the
+  user's first tap — anywhere in the translate view, not just on the box
+  — brings the keyboard straight up.
 - `sourceText` is focused at the end of `init()` (synchronously, after
   the theme/phrase-gap setup but before the `await db.getAllEntries()`
   point) so the on-screen keyboard — and its dictation mic button — is

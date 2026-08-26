@@ -592,7 +592,13 @@ document.addEventListener('visibilitychange', () => {
 document.addEventListener('click', (event) => {
   if (el.viewTranslate.hidden) return;
   if (event.target.closest('button, select, input, textarea, a, [tabindex], .tabbar')) return;
-  focusSourceText();
+  // If the field is already focused (it is on launch — see `autofocus`
+  // above), calling focus() again is a no-op: no focus CHANGE happens,
+  // so iOS has nothing to raise the keyboard for, and the tap does
+  // nothing visible. Bounce focus instead, so this gesture carries a
+  // real blur→focus transition, which is what actually opens it.
+  if (document.activeElement === el.sourceText) el.sourceText.blur();
+  el.sourceText.focus();
 });
 
 el.clearInputBtn.addEventListener('click', () => {

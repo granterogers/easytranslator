@@ -322,6 +322,15 @@ let lastInputValue = '';
 // there in the same order, whatever happened to the spacing and
 // punctuation around them.
 let committedWordCount = 0;
+// The shape of the phrase currently on screen, kept so a wholesale
+// rewrite (see the 'input' handler) can restore the same phrase by
+// counting back from the end of the new text.
+let lastPhraseWordCount = 0;
+let lastTotalWordCount = 0;
+// Set when a pause elapsed but the event that crossed it carried only a
+// separator; holds the text the finished phrase ended at until the new
+// phrase's first real character arrives.
+let pendingBoundaryValue = null;
 
 const PHRASE_SEPARATOR_RE = /[\s.,!?;:]/;
 
@@ -447,6 +456,9 @@ function syncInputTracking() {
   lastInputAt = Date.now();
   lastInputValue = el.sourceText.value;
   committedWordCount = 0;
+  pendingBoundaryValue = null;
+  lastPhraseWordCount = countWords(el.sourceText.value);
+  lastTotalWordCount = lastPhraseWordCount;
   renderSourceOverlay();
 }
 
@@ -467,29 +479,77 @@ el.sourceText.addEventListener('input', () => {
   lastInputAt = now;
   lastInputValue = value;
 
-  if (gap >= getPhraseGapMs() && previousValue && value.length > previousValue.length) {
-    // A real pause elapsed and new text just landed on top of the old
-    // phrase: every word up to that point belongs to a finished phrase.
-    // Moving this count is the entire "clear" — no write to the field,
-    // so nothing for live dictation to collide with. It is NOT clamped
-    // when the value shrinks: a transient empty value is exactly what
-    // iOS produces mid-commit when dictation is switched off, and
-    // resetting on it is what used to dump the whole session on screen.
-    // getPhraseStart() handles "fewer words than committed" instead.
-    committedWordCount = countWords(previousValue);
-  }
+  // Live dictation and typing only ever APPEND to the end of the field.
+  // Switching dictation off is different in kind: iOS throws away what
+  // was there and re-commits the whole session, re-punctuated and
+  // recapitalised (sometimes as a clear followed by a refill, sometimes
+  // as one replacement). Those rewrites must never be read as "a new
+  // phrase started" — nothing new was said — so they're handled
+  // separately below and can only ever RE-ANCHOR the phrase already on
+  // screen, never create a boundary.
+  const isAppend = previousValue !== '' && value.startsWith(previousValue);
 
-  // New text arrived, yet the last committed word now runs to the very
-  // end of the field: the boundary is stale because those characters
-  // merged into it (backspacing into a committed word, then typing on).
-  // Hand that word back to the current phrase — otherwise typing would
-  // go invisible, since the overlay would have nothing left to draw.
-  // Tested against committedPrefixEnd() rather than getPhraseStart() on
-  // purpose: when a new phrase opens with a space, the phrase really is
-  // empty for that one keystroke, and skipping separators first would
-  // misread that as staleness and leak the previous word back in.
-  if (value.length > previousValue.length && committedPrefixEnd() === value.length) {
-    committedWordCount = Math.max(0, countWords(value) - 1);
+  if (isAppend) {
+    // Require real content in what arrived, not just punctuation: iOS
+    // tacking a final "." or "?" onto the last phrase is not the start
+    // of a new one, and treating it as one would blank the box at
+    // exactly the moment dictation stops.
+    const added = value.slice(previousValue.length);
+    const addedRealContent = /[^\s.,!?;:]/.test(added);
+
+    if (gap >= getPhraseGapMs()) {
+      // A real pause just elapsed. Everything already in the field
+      // belongs to the finished phrase — but only actually cut once
+      // real content shows up. If the pause-crossing event carried
+      // nothing but a separator (dictation and typing both routinely
+      // deliver the leading space of a new phrase on its own), hold the
+      // cut as pending: by the time the first real word lands the gap
+      // is milliseconds and would no longer look like a boundary at all.
+      if (addedRealContent) committedWordCount = countWords(previousValue);
+      else pendingBoundaryValue = previousValue;
+    } else if (pendingBoundaryValue !== null && addedRealContent) {
+      // The real content the pause was waiting for.
+      committedWordCount = countWords(pendingBoundaryValue);
+      pendingBoundaryValue = null;
+    }
+    if (addedRealContent) pendingBoundaryValue = null;
+
+    // New text arrived, yet the last committed word now runs to the very
+    // end of the field: the boundary is stale because those characters
+    // merged into it (backspacing into a committed word, then typing
+    // on). Hand that word back to the current phrase — otherwise typing
+    // would go invisible, since the overlay would have nothing left to
+    // draw. Tested against committedPrefixEnd() rather than
+    // getPhraseStart() on purpose: when a new phrase opens with a space
+    // the phrase really is empty for that one keystroke, and skipping
+    // separators first would misread that as staleness and leak the
+    // previous word back in.
+    if (committedPrefixEnd() === value.length) {
+      committedWordCount = Math.max(0, countWords(value) - 1);
+    }
+  } else if (lastPhraseWordCount > 0 && countWords(value) >= lastTotalWordCount) {
+    // A rewrite that still carries the whole session (this is the
+    // dictation-off re-commit). The words are all still there in order,
+    // so keep showing the SAME phrase by counting back from the END —
+    // whatever punctuation moved around in front of it. Anchoring from
+    // the end is what keeps "the last thing I said" the last thing on
+    // screen even when iOS renumbers everything before it.
+    committedWordCount = Math.max(0, countWords(value) - lastPhraseWordCount);
+  }
+  // Any other rewrite (a paste over everything, the transient empty
+  // value mid-commit) deliberately leaves committedWordCount alone —
+  // getPhraseStart() copes when there are fewer words present than
+  // committed, and clobbering it here is exactly what used to dump the
+  // whole session on screen.
+
+  // Remember the shape of what we're showing, but only while there IS
+  // something to show: the transient empty value in the middle of a
+  // dictation-off commit must not overwrite the phrase we need to
+  // restore once the refill arrives a moment later.
+  const phraseNow = getCurrentPhraseText().trim();
+  if (phraseNow) {
+    lastPhraseWordCount = countWords(phraseNow);
+    lastTotalWordCount = countWords(value);
   }
 
   updatePhraseLed();
@@ -504,6 +564,36 @@ document.addEventListener('selectionchange', () => {
 });
 el.sourceText.addEventListener('focus', renderSourceOverlay);
 el.sourceText.addEventListener('blur', renderSourceOverlay);
+
+// ---------- Keeping the input ready to type/dictate into ----------
+
+// Focused on launch (and again whenever the app is brought back to the
+// foreground, which for an installed PWA is the common "launch") so the
+// keyboard and its mic button are one tap away rather than needing a tap
+// on the field first. iOS only *opens* the software keyboard off a real
+// user gesture, so this can't force it up by itself — but a focused
+// field means the single tap that follows goes straight to the keyboard.
+function focusSourceText() {
+  if (!el.viewTranslate.hidden) el.sourceText.focus();
+}
+
+window.addEventListener('pageshow', focusSourceText);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) focusSourceText();
+});
+
+// ...and a tap on any dead space in the translate view counts as "I want
+// to type here", so the keyboard comes up without having to hit the box
+// itself. Anything actually interactive is left alone. Bound to 'click'
+// rather than 'pointerdown' for two reasons: pointerdown runs before the
+// browser settles focus, so it just gets overridden a moment later; and
+// focusing inside a click handler is a genuine user gesture, which is
+// the one thing iOS will actually open the software keyboard for.
+document.addEventListener('click', (event) => {
+  if (el.viewTranslate.hidden) return;
+  if (event.target.closest('button, select, input, textarea, a, [tabindex], .tabbar')) return;
+  focusSourceText();
+});
 
 el.clearInputBtn.addEventListener('click', () => {
   el.sourceText.value = '';

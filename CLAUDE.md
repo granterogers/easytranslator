@@ -72,6 +72,25 @@
   flow translates and saves to history, what `toggleClearButton()` and
   `updatePhraseLed()` read, and what `swapBtn` reverses — **not** the raw
   field value, which holds the whole hidden transcript.
+  **Live dictation and typing only ever APPEND to the end of the field;
+  switching dictation off is different in kind** — iOS discards what was
+  there and re-commits the whole session re-punctuated, sometimes as a
+  clear followed by a refill, sometimes as one replacement, sometimes in
+  chunks. The handler therefore branches on
+  `previousValue !== '' && value.startsWith(previousValue)`. A rewrite
+  must never be read as "a new phrase started" (nothing new was said):
+  it can only RE-ANCHOR the phrase already on screen, by keeping
+  `lastPhraseWordCount` words and counting back from the END of the new
+  text, so "the last thing I said" stays last however iOS renumbers
+  everything in front of it. Guarded on the rewrite still carrying the
+  whole session (`countWords(value) >= lastTotalWordCount`) so that
+  typing over a selection isn't mistaken for a re-commit; any other
+  rewrite — including the transient empty value mid-commit — leaves the
+  count alone, and `lastPhraseWordCount`/`lastTotalWordCount` are only
+  updated while a phrase is actually on screen so that transient can't
+  erase what has to be restored a moment later. Getting this wrong
+  showed up on a real device as the last two phrases run together after
+  stopping dictation.
   The count advances in the `input` handler at the moment the first
   chunk of a NEW phrase lands (a real pause elapsed AND the value grew)
   — deliberately **not** on the idle timer. That ordering is the whole
@@ -83,6 +102,14 @@
   version that advanced this on the idle poll wiped the English the
   moment the LED went green, which is wrong — "idle" is not "starting a
   new phrase".
+  A pause-crossing event that carried only a separator does NOT cut
+  immediately — dictation and typing both routinely deliver the leading
+  space of a new phrase on its own, and by the time the first real word
+  lands the measured gap is milliseconds and no longer looks like a
+  boundary at all. `pendingBoundaryValue` holds the cut until real
+  content (`/[^\s.,!?;:]/`) arrives. The same test stops iOS tacking a
+  final "." onto the last phrase from being read as a new phrase, which
+  would blank the box at exactly the moment dictation stops.
   The boundary is recorded by COUNTING the previous value's words, never
   by matching the old phrase's characters, so iOS retroactively editing
   the old phrase's tail (e.g. swapping its trailing space for a period
@@ -141,6 +168,18 @@
   only READS state: unlike an earlier design, it must never advance the
   phrase boundary or touch the field, or the English disappears the
   instant the LED turns green.
+- Keeping the field ready to dictate into: `autofocus` on the textarea,
+  plus `focusSourceText()` on `pageshow` and on `visibilitychange`
+  (returning from the background is what "launching" usually means for
+  an installed PWA), plus a document-level **`click`** handler that
+  focuses it when a tap lands on dead space in the translate view.
+  That last one is bound to `click`, not `pointerdown`: pointerdown runs
+  before the browser settles focus so it just gets overridden a moment
+  later (verified — it silently did nothing), and focusing inside a
+  click handler is a real user gesture, which is the only thing iOS will
+  open the software keyboard for. It bails on
+  `button, select, input, textarea, a, [tabindex], .tabbar` so it can't
+  steal focus from a control the user actually tapped.
 - `sourceText` is focused at the end of `init()` (synchronously, after
   the theme/phrase-gap setup but before the `await db.getAllEntries()`
   point) so the on-screen keyboard — and its dictation mic button — is

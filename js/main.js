@@ -322,11 +322,6 @@ let lastInputValue = '';
 // there in the same order, whatever happened to the spacing and
 // punctuation around them.
 let committedWordCount = 0;
-// The shape of the phrase currently on screen, kept so a wholesale
-// rewrite (see the 'input' handler) can restore the same phrase by
-// counting back from the end of the new text.
-let lastPhraseWordCount = 0;
-let lastTotalWordCount = 0;
 // Set when a pause elapsed but the event that crossed it carried only a
 // separator; holds the text the finished phrase ended at until the new
 // phrase's first real character arrives.
@@ -457,8 +452,6 @@ function syncInputTracking() {
   lastInputValue = el.sourceText.value;
   committedWordCount = 0;
   pendingBoundaryValue = null;
-  lastPhraseWordCount = countWords(el.sourceText.value);
-  lastTotalWordCount = lastPhraseWordCount;
   renderSourceOverlay();
 }
 
@@ -527,30 +520,18 @@ el.sourceText.addEventListener('input', () => {
     if (committedPrefixEnd() === value.length) {
       committedWordCount = Math.max(0, countWords(value) - 1);
     }
-  } else if (lastPhraseWordCount > 0 && countWords(value) >= lastTotalWordCount) {
-    // A rewrite that still carries the whole session (this is the
-    // dictation-off re-commit). The words are all still there in order,
-    // so keep showing the SAME phrase by counting back from the END —
-    // whatever punctuation moved around in front of it. Anchoring from
-    // the end is what keeps "the last thing I said" the last thing on
-    // screen even when iOS renumbers everything before it.
-    committedWordCount = Math.max(0, countWords(value) - lastPhraseWordCount);
   }
-  // Any other rewrite (a paste over everything, the transient empty
-  // value mid-commit) deliberately leaves committedWordCount alone —
-  // getPhraseStart() copes when there are fewer words present than
-  // committed, and clobbering it here is exactly what used to dump the
-  // whole session on screen.
-
-  // Remember the shape of what we're showing, but only while there IS
-  // something to show: the transient empty value in the middle of a
-  // dictation-off commit must not overwrite the phrase we need to
-  // restore once the refill arrives a moment later.
-  const phraseNow = getCurrentPhraseText().trim();
-  if (phraseNow) {
-    lastPhraseWordCount = countWords(phraseNow);
-    lastTotalWordCount = countWords(value);
-  }
+  // A REWRITE (not an append) deliberately leaves committedWordCount
+  // completely untouched — no attempt to guess or re-anchor anything.
+  // This is what "switching dictation off shouldn't change what's on
+  // screen" actually means in code: the word count still points at the
+  // same words it did before, and since a rewrite only ever changes
+  // surrounding punctuation/capitalization (never the words themselves
+  // or their order), getPhraseStart() finds the exact same phrase in the
+  // freshly-corrected text and the overlay just re-renders it, cleaned
+  // up. Trying to be clever here — re-anchoring from the end, comparing
+  // word counts before/after — was tried and caused its own visible
+  // glitches on a real device; doing nothing is both simpler and correct.
 
   updatePhraseLed();
   toggleClearButton();
@@ -677,19 +658,15 @@ function findHistoryMatch(source, target, text) {
   return translationIndex.get(translationKey(source, target, text)) || null;
 }
 
-// Google is the expected/default-quality provider (see js/api.js), so no
-// note is shown when it's the one that answered — only when a lesser
-// fallback provider actually produced the result, so a wording difference
-// from the real Google Translate app has a visible, honest explanation
-// right on the result instead of silently looking like a quality bug.
-const PROVIDER_LABELS = { libretranslate: 'LibreTranslate', mymemory: 'MyMemory' };
-
+// Only the dictionary fallback gets a note — that one is a real quality
+// caveat the user needs (word-for-word, no grammar). Which server
+// actually answered (Google vs. a fallback provider) used to be shown
+// too, but that's plumbing, not something the user needs surfaced next
+// to a translation that's already right there on screen — by request,
+// removed. `provider`/`googleError` are still saved on history entries
+// (see runTranslate()) in case that attribution is ever wanted again.
 function describeTranslationSource(usedDictionary, provider, googleError) {
   if (usedDictionary) return 'Offline word dictionary — approximate, not a full translation';
-  if (provider && provider !== 'google') {
-    const reason = googleError ? ` — Google error: ${googleError}` : '';
-    return `Translated via ${PROVIDER_LABELS[provider] || provider} (Google unavailable${reason})`;
-  }
   return null;
 }
 

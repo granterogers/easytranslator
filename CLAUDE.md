@@ -76,21 +76,20 @@
   switching dictation off is different in kind** — iOS discards what was
   there and re-commits the whole session re-punctuated, sometimes as a
   clear followed by a refill, sometimes as one replacement, sometimes in
-  chunks. The handler therefore branches on
-  `previousValue !== '' && value.startsWith(previousValue)`. A rewrite
-  must never be read as "a new phrase started" (nothing new was said):
-  it can only RE-ANCHOR the phrase already on screen, by keeping
-  `lastPhraseWordCount` words and counting back from the END of the new
-  text, so "the last thing I said" stays last however iOS renumbers
-  everything in front of it. Guarded on the rewrite still carrying the
-  whole session (`countWords(value) >= lastTotalWordCount`) so that
-  typing over a selection isn't mistaken for a re-commit; any other
-  rewrite — including the transient empty value mid-commit — leaves the
-  count alone, and `lastPhraseWordCount`/`lastTotalWordCount` are only
-  updated while a phrase is actually on screen so that transient can't
-  erase what has to be restored a moment later. Getting this wrong
-  showed up on a real device as the last two phrases run together after
-  stopping dictation.
+  chunks. The handler branches on
+  `previousValue !== '' && value.startsWith(previousValue)` to tell the
+  two apart, and on a REWRITE (the `else` branch — not an append)
+  `committedWordCount` is deliberately left completely untouched. An
+  earlier version tried to be clever here — re-anchoring by counting
+  back from the end of the new text so "the last thing I said" stayed
+  last — which fixed one reported bug (the last two phrases running
+  together after stopping dictation) but introduced a different one, a
+  real user reported visible glitches in the text box right as dictation
+  stopped. Doing nothing is both simpler and correct: a rewrite only
+  ever changes surrounding punctuation/capitalization, never the words
+  themselves or their order, so the untouched word count still points at
+  the exact same words in the freshly-corrected text, and the overlay
+  just re-renders them, cleaned up, with no adjustment visible at all.
   The count advances in the `input` handler at the moment the first
   chunk of a NEW phrase lands (a real pause elapsed AND the value grew)
   — deliberately **not** on the idle timer. That ordering is the whole
@@ -284,21 +283,26 @@
 - `api.translateText()` returns which provider actually answered
   (`provider` field) plus `googleError` (Google's last known failure
   reason, from this call's own attempt or the background check above).
-  `js/main.js`'s `describeTranslationSource()` shows `#translationNote`
-  for anything other than Google ("Translated via LibreTranslate/MyMemory
-  (Google unavailable — Google error: ...)") — nothing is shown when
-  Google succeeds, since that's the expected/default-quality path and
-  showing a note every time would just be noise. This exists specifically
-  so a wording difference from the real Google Translate app has a
-  visible, honest explanation instead of looking like an unexplained
-  quality bug — a JSON-parse error in `googleError` means Google served
-  an HTML block/CAPTCHA page instead of a translation (200 OK, so
-  `res.ok` doesn't catch it); "Failed to fetch" means the request never
-  got a response at all (network-level — CORS is the prime suspect,
-  though unconfirmed without a live device test). Saved on the history
-  entry (`provider`, `usedDictionary`, `googleError` fields) so replaying
-  that exact entry later (see `findHistoryMatch()` below) shows the same
-  attribution, not a blank one.
+  These are still saved on the history entry (`provider`, `usedDictionary`,
+  `googleError` fields) for whenever that attribution is wanted, but
+  `js/main.js`'s `describeTranslationSource()` no longer surfaces the
+  provider/error part in `#translationNote` — an earlier version showed
+  "Translated via LibreTranslate/MyMemory (Google unavailable — Google
+  error: ...)" whenever a fallback provider answered, on the reasoning
+  that a wording difference from the real Google Translate app deserved
+  an honest explanation. By explicit request, that's gone: it read as
+  visible plumbing/debug noise next to a translation that's already
+  right there and working — nice to have in `git log` for debugging
+  provider issues, not something to put in front of the user by default.
+  `describeTranslationSource()` now only ever returns the dictionary
+  warning below, which is a real quality caveat (word-for-word, no
+  grammar) rather than attribution. A JSON-parse error in `googleError`
+  means Google served an HTML block/CAPTCHA page instead of a
+  translation (200 OK, so `res.ok` doesn't catch it); "Failed to fetch"
+  means the request never got a response at all (network-level — CORS is
+  the prime suspect, though unconfirmed without a live device test) —
+  still useful context if debugging provider failures from saved history
+  data directly, just not shown in the UI.
 - `REQUEST_TIMEOUT_MS` (5s) bounds how long a single dead provider can
   stall the fallback chain — every provider here is a plain text-
   translation call that should answer in well under a second when

@@ -39,6 +39,7 @@ const el = {
   targetLang: $('targetLang'),
   swapBtn: $('swapBtn'),
   sourceText: $('sourceText'),
+  sourceOverlay: $('sourceOverlay'),
   phraseLed: $('phraseLed'),
   statusLabel: $('statusLabel'),
   detectedLabel: $('detectedLabel'),
@@ -221,7 +222,9 @@ el.swapBtn.addEventListener('click', () => {
   el.targetLang.value = s;
 
   const hadResult = !el.resultBlock.hidden;
-  const srcVal = el.sourceText.value;
+  // The current phrase, not the whole hidden transcript — that's what
+  // produced the shown result, and it's what the box appears to contain.
+  const srcVal = getCurrentPhraseText();
   const resVal = el.resultText.textContent;
   if (hadResult) {
     el.sourceText.value = resVal;
@@ -253,68 +256,160 @@ el.copyResultBtn.addEventListener('click', async () => {
 // ---------- Input handling ----------
 
 function toggleClearButton() {
-  el.clearInputBtn.hidden = el.sourceText.value.length === 0;
+  el.clearInputBtn.hidden = getCurrentPhraseText().length === 0;
 }
 
+// ---------- Dictation phrase splitting ----------
+//
 // Dictation via the iOS keyboard's mic types straight into the focused
-// field, so without this a whole day's worth of separate things you say
-// would just keep piling up into one ever-growing block instead of each
-// becoming its own translation. A prior design tracked the phrase
-// boundary as a plain number and never touched sourceText.value at all,
-// specifically to rule out any chance of disrupting iOS's dictation
-// engine — but the tradeoff was that the box visibly kept growing into a
-// running transcript instead of ever looking like it reset, which real
-// usage showed was worse than the disruption risk it was trying to
-// avoid. This version goes back to actually removing the old phrase's
-// text from the box — the box holds only the current phrase at all
-// times — but does it as ONE synchronous mutation, exactly once, right
-// when the new phrase's first real character arrives (not proactively
-// on a timer, and not stripped off gradually after a debounce).
-// Concretely: the 'input' listener below detects "a real pause just
-// elapsed AND new text was appended" and immediately rewrites
-// `sourceText.value` down to just the newly-arrived part, by LENGTH
-// (`value.slice(previousValue.length)`) rather than comparing text
-// content — so it doesn't matter if iOS retroactively touched the old
-// phrase's trailing punctuation, there's nothing to mismatch. Because
-// this only fires once per phrase (immediately re-syncing its own
-// tracking so the very next keystroke no longer looks like a boundary),
-// subsequent chunks of the SAME new phrase just append normally with no
-// further mutation. The already-completed phrase is already saved to
-// history by the live-translate flow by the time the pause is detected,
-// since `MID_WORD_DEBOUNCE_MS` is far shorter than any sane pause
-// setting. There's no way to distinguish dictation from manual typing at
-// the input-event level, so a person who manually pauses mid-thought for
-// longer than the threshold and then keeps typing the *same* sentence
-// will also get the earlier part cleared — a real, accepted tradeoff of
-// this feature, not a bug to chase.
+// field, so without help a whole day's worth of separate things you say
+// would pile up into one ever-growing block instead of each
+// pause-separated thing becoming its own translation.
+//
+// SIX designs were tried before this one, and the single most important
+// thing learned from them: **any** write to `sourceText.value` (or its
+// selection) while the mic session may still be live disrupts iOS's
+// dictation engine — a stall of up to a minute, the app appearing to
+// stop, or a ~10s lag before the next phrase catches up. That held true
+// for a synchronous write, a `setTimeout(0)` one, a 700ms-debounced one,
+// a `.select()` instead of a write, and even a write performed only
+// after several seconds of confirmed silence. A multi-second pause
+// between sentences is NOT the same thing as the dictation session
+// having ended, so "wait until it's quiet, then write" is not a safe
+// strategy — there is no safe moment to write while the mic is on.
+// The one design that did NOT disrupt dictation was the one that never
+// wrote to the field at all. Its only flaw was cosmetic: the box grew
+// into a visible running transcript instead of ever looking like it
+// reset for a new phrase.
+//
+// So: keep the engine that works, and fix the appearance separately.
+// `sourceText.value` is never rewritten here — dictation appends to it
+// freely for the whole session. `phraseBoundaryOffset` is a plain JS
+// number marking where the current phrase starts inside that value, and
+// `#sourceOverlay` (see renderSourceOverlay() below) paints ONLY the
+// text from that offset onward over the top of the field, whose own
+// text is transparent. Visually the box holds exactly the current
+// phrase; underneath, the field iOS is dictating into is never touched.
+//
+// The offset advances in the `input` handler at the moment the first
+// chunk of a NEW phrase lands (a real pause elapsed AND the value grew)
+// — deliberately NOT on the idle timer. That ordering is the whole
+// point: during the pause the offset is unchanged, so the phrase you
+// just said stays on screen; the instant you start saying something new
+// the offset jumps and the box shows only the new words. Cleared first,
+// then filled — with no write to the field to make it happen.
+//
+// The boundary is recorded as a LENGTH (`previousValue.length`), never by
+// matching the old phrase's characters, so iOS retroactively editing the
+// old phrase's tail (e.g. swapping its trailing space for a period once
+// a new sentence starts) can't make this silently do nothing. Any
+// leading separator left at the cut is skipped when slicing.
+//
+// There's no way to distinguish dictation from manual typing at the
+// input-event level, so someone who manually pauses mid-thought past the
+// threshold and keeps typing the same sentence will also have the
+// earlier part drop out of view — a real, accepted tradeoff, not a bug.
 let lastInputAt = Date.now();
 let lastInputValue = '';
+let phraseBoundaryOffset = 0;
 
-// Red while the box has text and the pause threshold above hasn't
+const PHRASE_SEPARATOR_RE = /[\s.,!?;:]/;
+
+// Where the visible phrase actually begins: the recorded boundary, plus
+// any separator characters sitting right at it (so a new phrase never
+// renders with a leading " " or ". " left over from the previous one).
+function getPhraseStart() {
+  const full = el.sourceText.value;
+  let i = Math.min(phraseBoundaryOffset, full.length);
+  while (i < full.length && PHRASE_SEPARATOR_RE.test(full[i])) i++;
+  return i;
+}
+
+// The only text this app treats as "what the user is asking to
+// translate" — everything before it is a previous phrase that's already
+// been translated and saved to history.
+function getCurrentPhraseText() {
+  return el.sourceText.value.slice(getPhraseStart());
+}
+
+// Paints the current phrase (and a caret) over the transparent-text
+// textarea, so the box looks like it contains only that phrase.
+function renderSourceOverlay() {
+  const overlay = el.sourceOverlay;
+  const start = getPhraseStart();
+  const phrase = el.sourceText.value.slice(start);
+  const focused = document.activeElement === el.sourceText;
+
+  overlay.textContent = '';
+
+  if (!phrase) {
+    if (focused) overlay.appendChild(makeCaret());
+    const placeholder = document.createElement('span');
+    placeholder.className = 'source-overlay-placeholder';
+    placeholder.textContent = el.sourceText.placeholder;
+    overlay.appendChild(placeholder);
+    return;
+  }
+
+  // Map the real caret into the visible phrase so tapping mid-text still
+  // puts the drawn caret where typing will actually land.
+  const caretAt = Math.max(0, Math.min(el.sourceText.selectionStart - start, phrase.length));
+  overlay.appendChild(document.createTextNode(phrase.slice(0, caretAt)));
+  const caret = focused ? overlay.appendChild(makeCaret()) : null;
+  overlay.appendChild(document.createTextNode(phrase.slice(caretAt)));
+
+  // The overlay scrolls independently of the textarea (whose own scroll
+  // tracks the full hidden transcript, not what's drawn here) — keep the
+  // caret in view the way a real field would.
+  if (!caret) {
+    overlay.scrollTop = 0;
+    return;
+  }
+  const top = caret.offsetTop;
+  const bottom = top + caret.offsetHeight;
+  if (bottom > overlay.scrollTop + overlay.clientHeight) {
+    overlay.scrollTop = bottom - overlay.clientHeight;
+  } else if (top < overlay.scrollTop) {
+    overlay.scrollTop = top;
+  }
+}
+
+function makeCaret() {
+  const caret = document.createElement('span');
+  caret.className = 'source-overlay-caret';
+  return caret;
+}
+
+// Red while the current phrase has text and the pause threshold hasn't
 // elapsed since the last keystroke/dictated chunk (more speech now would
-// extend the current phrase); green once it has, or whenever the box is
-// empty. Hidden entirely when the feature is off (see getPhraseGapMs()).
-// Polled on an interval rather than only on 'input' because the
-// red→green transition happens passively as time passes, with no event
-// of its own to react to.
+// extend it); green once it has, or whenever the box looks empty. Hidden
+// entirely when the feature is off (see getPhraseGapMs()). Polled on an
+// interval rather than only on 'input' because the red→green transition
+// happens passively as time passes, with no event of its own to react
+// to. Note this only READS state — unlike an earlier design, it never
+// touches the field or advances the boundary.
 function updatePhraseLed() {
   const disabled = !Number.isFinite(getPhraseGapMs());
   el.phraseLed.hidden = disabled;
   if (disabled) return;
-  const hasText = el.sourceText.value.trim().length > 0;
+  const hasText = getCurrentPhraseText().trim().length > 0;
   const ready = !hasText || (Date.now() - lastInputAt) >= getPhraseGapMs();
   el.phraseLed.classList.toggle('is-ready', ready);
 }
 setInterval(updatePhraseLed, 250);
 
-// Call after any PROGRAMMATIC change to sourceText.value (restoring a
-// history entry, the clear button, swap) — those don't fire a real
-// 'input' event, so without this the pause-tracking above would compare
-// the next real keystroke/dictated chunk against a stale snapshot from
-// before the change and could mis-fire the phrase-reset logic.
+// Call after any PROGRAMMATIC change to sourceText.value (the clear
+// button, restoring a history entry, swap) — those don't fire a real
+// 'input' event, so without this the pause-tracking would compare the
+// next real keystroke/dictated chunk against a stale snapshot. Each of
+// them also replaces the field's whole content, so the boundary resets
+// to 0: the new value counts as one fresh phrase. These are all explicit
+// user taps, not dictation-time writes, so they're safe.
 function syncInputTracking() {
   lastInputAt = Date.now();
   lastInputValue = el.sourceText.value;
+  phraseBoundaryOffset = 0;
+  renderSourceOverlay();
 }
 
 el.sourceText.addEventListener('input', () => {
@@ -332,24 +427,31 @@ el.sourceText.addEventListener('input', () => {
   const gap = now - lastInputAt;
   const previousValue = lastInputValue;
   lastInputAt = now;
+  lastInputValue = value;
 
   if (gap >= getPhraseGapMs() && previousValue && value.length > previousValue.length) {
-    // A real pause just elapsed and new text landed on top of the old
-    // phrase — cut the old part off immediately so only the new part
-    // remains. Cutting by LENGTH (not matching the old text's exact
-    // characters) means an iOS punctuation tweak to the old phrase's
-    // tail can't make this silently do nothing.
-    const trimmed = value.slice(previousValue.length).replace(/^[\s.,!?;:]+/, '');
-    el.sourceText.value = trimmed;
-    lastInputValue = trimmed;
-  } else {
-    lastInputValue = value;
+    // A real pause elapsed and new text just landed on top of the old
+    // phrase: everything up to where it started is now a previous
+    // phrase. Moving this number is the entire "clear" — no write to
+    // the field, so nothing for live dictation to collide with.
+    phraseBoundaryOffset = previousValue.length;
+  } else if (value.length < phraseBoundaryOffset) {
+    // Backspaced past the boundary (manual editing) — keep it in range.
+    phraseBoundaryOffset = value.length;
   }
 
   updatePhraseLed();
   toggleClearButton();
+  renderSourceOverlay();
   scheduleTranslate();
 });
+
+// The drawn caret has to follow taps/arrow keys, not just typing.
+document.addEventListener('selectionchange', () => {
+  if (document.activeElement === el.sourceText) renderSourceOverlay();
+});
+el.sourceText.addEventListener('focus', renderSourceOverlay);
+el.sourceText.addEventListener('blur', renderSourceOverlay);
 
 el.clearInputBtn.addEventListener('click', () => {
   el.sourceText.value = '';
@@ -379,7 +481,7 @@ function hideError() {
 
 function scheduleTranslate() {
   clearTimeout(debounceTimer);
-  const value = el.sourceText.value;
+  const value = getCurrentPhraseText();
   if (!value.trim()) {
     runTranslate(); // nothing to debounce — clear state right away
     return;
@@ -422,7 +524,7 @@ function describeTranslationSource(usedDictionary, provider, googleError) {
 }
 
 async function runTranslate() {
-  const text = el.sourceText.value.trim();
+  const text = getCurrentPhraseText().trim();
   const source = el.sourceLang.value;
   const target = el.targetLang.value;
 
@@ -785,6 +887,7 @@ async function init() {
 
   toggleClearButton();
   updatePhraseLed();
+  renderSourceOverlay();
 
   registerServiceWorker();
 }

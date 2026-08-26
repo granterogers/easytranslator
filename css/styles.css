@@ -195,7 +195,55 @@ button, input, select, textarea {
   line-height: 1.35;
 }
 
-.source-text::placeholder { color: var(--text-faint); }
+/* The textarea keeps the whole dictation session's text (never rewritten
+   mid-session — see index.html), but shows none of it: #sourceOverlay
+   paints just the current phrase over the top instead. The real caret is
+   hidden too, since it sits at the end of the FULL hidden text rather
+   than where the visible phrase ends; the overlay draws its own. */
+.source-text {
+  color: transparent;
+  caret-color: transparent;
+}
+
+.source-text::placeholder { color: transparent; }
+
+/* Must match .source-text's box + text metrics exactly, or the visible
+   phrase won't line up with the field it's standing in for. */
+.source-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  overflow: hidden;
+  border: 1px solid transparent;
+  padding: 14px 44px 14px 14px;
+  font-family: inherit;
+  font-size: 18px;
+  line-height: 1.35;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  text-align: left;
+}
+
+.source-overlay-placeholder { color: var(--text-faint); }
+
+.source-overlay-caret {
+  display: inline-block;
+  width: 2px;
+  margin-right: -2px;
+  height: 1.1em;
+  vertical-align: text-bottom;
+  background: var(--accent, var(--text));
+  animation: caret-blink 1.06s step-end infinite;
+}
+
+@keyframes caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
 
 .clear-btn {
   position: absolute;

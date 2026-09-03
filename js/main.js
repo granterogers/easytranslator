@@ -322,6 +322,10 @@ let lastInputValue = '';
 // there in the same order, whatever happened to the spacing and
 // punctuation around them.
 let committedWordCount = 0;
+// The exact text as of the last commit, when it's still known precisely
+// — see getPhraseStart() below. Cleared (`''`) whenever only the
+// word-count fallback should be trusted.
+let committedPrefixSnapshot = '';
 // Set when a pause elapsed but the event that crossed it carried only a
 // separator; holds the text the finished phrase ended at until the new
 // phrase's first real character arrives.
@@ -334,9 +338,6 @@ function countWords(text) {
   return words ? words.length : 0;
 }
 
-// Where the visible phrase actually begins: the recorded boundary, plus
-// any separator characters sitting right at it (so a new phrase never
-// renders with a leading " " or ". " left over from the previous one).
 // Index just past the last committed word, or -1 if the field no longer
 // holds that many words at all.
 function committedPrefixEnd() {
@@ -352,9 +353,39 @@ function committedPrefixEnd() {
   return -1;
 }
 
+// Where the visible phrase actually begins.
+//
+// Two mechanisms, in order of preference:
+//
+// 1. `committedPrefixSnapshot` — the exact old text as of the moment a
+//    boundary was last set. As long as the field still starts with that
+//    exact string (true for the whole common case: dictation has done
+//    nothing but append since then), this is precise down to the
+//    character, which matters because word-counting alone cannot be:
+//    if dictation ever glues a new phrase's first word directly onto
+//    the old phrase's last word with no separating space (observed on a
+//    real device), the two merge into a single `\S+` token and no
+//    amount of counting whole words can split it back apart — the
+//    result was a permanent, compounding bug where every phrase from
+//    that point on stayed fused to the tail of the one before it. The
+//    snapshot sidesteps the problem entirely: it doesn't need to
+//    *discover* the boundary by re-scanning, it already knows.
+// 2. `committedWordCount` — used only once the snapshot no longer
+//    matches, which happens after a REWRITE (see the 'input' listener):
+//    switching dictation off makes iOS re-punctuate/re-capitalize the
+//    whole session, so the exact snapshot string is gone, but the same
+//    words are still there in the same order — a word count survives
+//    that swap where an exact string or a character offset can't.
 function getPhraseStart() {
   const full = el.sourceText.value;
-  // end < 0 means fewer words are present than we'd committed — the
+
+  if (committedPrefixSnapshot && full.startsWith(committedPrefixSnapshot)) {
+    let i = committedPrefixSnapshot.length;
+    while (i < full.length && PHRASE_SEPARATOR_RE.test(full[i])) i++;
+    return i;
+  }
+
+  // end <= 0 means fewer words are present than we'd committed — the
   // field was replaced or deleted down past the boundary, so there's no
   // committed prefix left to skip and whatever remains is the current
   // phrase. (Without this, typing a fresh short phrase after clearing by
@@ -451,6 +482,7 @@ function syncInputTracking() {
   lastInputAt = Date.now();
   lastInputValue = el.sourceText.value;
   committedWordCount = 0;
+  committedPrefixSnapshot = '';
   pendingBoundaryValue = null;
   renderSourceOverlay();
 }
@@ -489,6 +521,7 @@ el.sourceText.addEventListener('input', () => {
     // exactly the moment dictation stops.
     const added = value.slice(previousValue.length);
     const addedRealContent = /[^\s.,!?;:]/.test(added);
+    let boundaryJustSet = false;
 
     if (gap >= getPhraseGapMs()) {
       // A real pause just elapsed. Everything already in the field
@@ -498,27 +531,50 @@ el.sourceText.addEventListener('input', () => {
       // deliver the leading space of a new phrase on its own), hold the
       // cut as pending: by the time the first real word lands the gap
       // is milliseconds and would no longer look like a boundary at all.
-      if (addedRealContent) committedWordCount = countWords(previousValue);
-      else pendingBoundaryValue = previousValue;
+      if (addedRealContent) {
+        committedWordCount = countWords(previousValue);
+        committedPrefixSnapshot = previousValue;
+        boundaryJustSet = true;
+      } else pendingBoundaryValue = previousValue;
     } else if (pendingBoundaryValue !== null && addedRealContent) {
       // The real content the pause was waiting for.
       committedWordCount = countWords(pendingBoundaryValue);
+      committedPrefixSnapshot = pendingBoundaryValue;
       pendingBoundaryValue = null;
+      boundaryJustSet = true;
     }
     if (addedRealContent) pendingBoundaryValue = null;
 
     // New text arrived, yet the last committed word now runs to the very
-    // end of the field: the boundary is stale because those characters
-    // merged into it (backspacing into a committed word, then typing
-    // on). Hand that word back to the current phrase — otherwise typing
-    // would go invisible, since the overlay would have nothing left to
-    // draw. Tested against committedPrefixEnd() rather than
-    // getPhraseStart() on purpose: when a new phrase opens with a space
-    // the phrase really is empty for that one keystroke, and skipping
-    // separators first would misread that as staleness and leak the
-    // previous word back in.
-    if (committedPrefixEnd() === value.length) {
+    // end of the field: the boundary MIGHT be stale because those
+    // characters merged into it (backspacing into a committed word, then
+    // typing on) — hand that word back to the current phrase, otherwise
+    // typing would go invisible, since the overlay would have nothing
+    // left to draw. But this exact same shape (a word-token that
+    // happens to run to the end of the string) is ALSO produced by a
+    // brand-new phrase whose first character glued onto the old
+    // phrase's last word with no separator at all — a real, confirmed
+    // case on real dictation, where the boundary above was JUST
+    // (correctly) set in THIS event. The two are indistinguishable from
+    // this check alone, so `boundaryJustSet` is the tiebreaker: only run
+    // this when the count is something OLDER than this event decided —
+    // never immediately after freshly cutting a new phrase, or a
+    // same-tick "new phrase" would be mistaken for stale backspill and
+    // its own boundary word would be handed right back, permanently
+    // gluing every phrase from then on to the tail of the one before it.
+    // Tested against committedPrefixEnd() rather than getPhraseStart()
+    // on purpose: when a new phrase opens with a space the phrase really
+    // is empty for that one keystroke, and skipping separators first
+    // would misread that as staleness and leak the previous word back
+    // into every phrase.
+    if (!boundaryJustSet && committedPrefixEnd() === value.length) {
       committedWordCount = Math.max(0, countWords(value) - 1);
+      // The exact-snapshot fast path in getPhraseStart() must not be
+      // trusted here even if it happens to still match — we've just
+      // admitted the count itself is an approximation for this tick, so
+      // force the word-count fallback until the next clean transition
+      // re-establishes a precise one.
+      committedPrefixSnapshot = '';
     }
   }
   // A REWRITE (not an append) deliberately leaves committedWordCount

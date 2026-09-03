@@ -300,6 +300,7 @@ function checkGoogleInBackground(text, source, target) {
     .then(() => {
       localStorage.setItem(PROVIDER_KEY, 'google');
       localStorage.removeItem(GOOGLE_ERROR_KEY);
+      failedThisSession.delete('google');
     })
     .catch((err) => {
       console.warn('[translate] google failed (background check):', err.message);
@@ -307,13 +308,28 @@ function checkGoogleInBackground(text, source, target) {
     });
 }
 
+// Free/undocumented endpoints like these three routinely rate-limit or
+// wobble under sustained real use, even mid-session — "worked the first
+// few times, then every call hangs" is exactly what it looks like when a
+// provider that's remembered as `preferred` (see below) starts failing:
+// every subsequent call would otherwise keep retrying that SAME
+// now-broken provider first and pay its full REQUEST_TIMEOUT_MS before
+// ever falling through to one that still works. This is a plain,
+// in-memory, per-page-load set (never persisted) of providers that have
+// failed at least once this session — they're demoted to the back of the
+// order (tried last, not skipped outright, since a rate limit can lift
+// mid-session) rather than kept in front just because they used to work.
+const failedThisSession = new Set();
+
 // Three independent providers, tried in whichever order worked last time
 // (so once one proves reliable for this user, we go straight to it instead
 // of re-trying a known-dead one on every call). Google is listed first as
 // the default order for a never-yet-resolved user — generally the best
 // quality of the three — but that's only the starting point; the memory
 // above means the actual steady-state order is whatever's proven reliable
-// for this specific user for this specific browser.
+// for this specific user for this specific browser, and the demotion
+// above keeps that memory from becoming a liability the moment it's
+// wrong for this particular session.
 export async function translateText({ text, source, target }) {
   const providers = [
     { id: 'google', supported: true, run: () => translateViaGoogleUnofficial(text, source, target) },
@@ -332,6 +348,10 @@ export async function translateText({ text, source, target }) {
     }
     providers.sort((a, b) => (a.id === preferred ? -1 : b.id === preferred ? 1 : 0));
   }
+  // Demotion is the primary sort key, applied after (so it overrides)
+  // the "preferred" ordering above — a provider that's already failed
+  // this session goes last regardless of past reputation.
+  providers.sort((a, b) => (failedThisSession.has(a.id) ? 1 : 0) - (failedThisSession.has(b.id) ? 1 : 0));
 
   // A provider that doesn't apply here (e.g. MyMemory + auto-detect) is
   // skipped silently — its "not supported" rejection must never overwrite
@@ -341,6 +361,7 @@ export async function translateText({ text, source, target }) {
     if (!provider.supported) continue;
     try {
       const result = await provider.run();
+      failedThisSession.delete(provider.id);
       localStorage.setItem(PROVIDER_KEY, provider.id);
       if (provider.id === 'google') localStorage.removeItem(GOOGLE_ERROR_KEY);
       // Surface *why* Google is currently down (from this call's own
@@ -350,6 +371,7 @@ export async function translateText({ text, source, target }) {
       return { ...result, provider: provider.id, googleError };
     } catch (err) {
       lastErr = err;
+      failedThisSession.add(provider.id);
       if (provider.id === 'google') localStorage.setItem(GOOGLE_ERROR_KEY, err.message);
       console.warn(`[translate] ${provider.id} failed:`, err.message);
     }

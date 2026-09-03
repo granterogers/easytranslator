@@ -68,6 +68,34 @@
   new phrase opens with a space the phrase really is empty for one
   keystroke, and skipping separators first misreads that as staleness
   and leaks the previous word back into every phrase.
+  **A pure word count is still not enough on its own — it cannot split
+  apart a token that two words got glued into.** A real, 100%-repeatable
+  bug: if dictation ever delivers a new phrase's first word with no
+  separating space from the old phrase's last word (confirmed — this
+  happens on a real device), `\S+`-based counting treats the two as ONE
+  token forever, and the exact backspace-guard above (which cannot tell
+  that case apart from a legitimate backspace-merge, since both produce
+  a word-token running to the end of the string) hands the merged word
+  back to the wrong phrase — permanently, since every later phrase then
+  glues onto the tail of the corrupted one. This read as "works the
+  first time, then stays broken" and was invisible to any test that
+  (like real speech usually does) always inserted a space at the
+  boundary; it only showed up once a test specifically omitted it.
+  `getPhraseStart()` therefore has a preferred, EXACT mechanism ahead of
+  the word count: `committedPrefixSnapshot`, the literal old text as of
+  the moment a boundary was last set. As long as the field still
+  `.startsWith()` that exact string — true for the entire common case,
+  since dictation only ever appends — the boundary is read directly off
+  its length, with no re-discovery, no tokenization, and therefore
+  nothing for a missing separator to corrupt. The word count is now
+  purely the fallback for when that snapshot no longer matches, which
+  happens precisely on a REWRITE (mic-off re-punctuates the whole
+  session, so the exact string is gone) — the one case the snapshot
+  can't survive and the word count was built for. The snapshot is
+  cleared (forcing the fallback) wherever the count itself stops being
+  precise: the backspace-merge guard, and `syncInputTracking()`'s reset.
+  Every place that sets a fresh, trustworthy boundary sets BOTH
+  together, always in the same breath.
   `getCurrentPhraseText()` is what the live-translate
   flow translates and saves to history, what `toggleClearButton()` and
   `updatePhraseLed()` read, and what `swapBtn` reverses — **not** the raw
@@ -280,6 +308,21 @@
   failure was slow rather than instant. Bounded to once per page load
   (`googleCheckedThisSession`) so it doesn't turn into a background
   request on every keystroke.
+- `translateText()`'s `failedThisSession` (a plain in-memory `Set`, never
+  persisted) demotes a provider to the back of the try-order the moment
+  it fails, rather than only reordering around whichever provider most
+  recently *succeeded* (`lt_provider_resolved`). The two mostly overlap,
+  but not always: if the last-successful provider doesn't apply to a
+  given call (MyMemory skipped for `auto`-detect or long text, say), the
+  *other* two fall back to their hardcoded default order — which still
+  put Google first even in a session where Google had already failed
+  outright. Free/undocumented endpoints like these can start rate-
+  limiting mid-session, and every call that still tries a known-dead one
+  first pays its full `REQUEST_TIMEOUT_MS` before reaching one that
+  works. Demotion isn't permanent — a provider can recover mid-session
+  (removed from the set on its next success, including via
+  `checkGoogleInBackground()`) — it's just never trusted first again
+  until it proves itself again.
 - `api.translateText()` returns which provider actually answered
   (`provider` field) plus `googleError` (Google's last known failure
   reason, from this call's own attempt or the background check above).
